@@ -97,23 +97,78 @@ function mockBootstrap() {
   mockedApiClient.getScenarios.mockResolvedValue(scenarios);
 }
 
+function makeTimeline() {
+  return {
+    run_id: "run-001",
+    events: [
+      {
+        index: 0,
+        event_type: "AGENT_PROPOSED",
+        run_id: "run-001",
+        title: "Agent Proposed",
+        detail: "The agent proposed a payment.",
+        payload: {
+          scenario: "clean",
+          naive_action: "Approve vendor payment",
+          vendor_id: "V-1042",
+          amount: 340000,
+          bank_account_last4: "8821"
+        }
+      },
+      {
+        index: 1,
+        event_type: "DECISION_MADE",
+        run_id: "run-001",
+        title: "Decision Made",
+        detail: "The deterministic engine decided.",
+        payload: {
+          status: "ALLOW",
+          allow_execution: true,
+          reason_codes: ["ALL_GATES_PASS"]
+        }
+      },
+      {
+        index: 2,
+        event_type: "PROOF_SEALED",
+        run_id: "run-001",
+        title: "Proof Packet Sealed",
+        detail: "The proof packet was sealed.",
+        payload: {
+          proof_hash: "a".repeat(64)
+        }
+      },
+      {
+        index: 3,
+        event_type: "EXECUTION_ACCEPTED",
+        run_id: "run-001",
+        title: "Execution Accepted",
+        detail: "The Mock Bank accepted the payment.",
+        payload: {
+          reason_code: "EXECUTION_ACCEPTED",
+          execution_reference: "MOCKBANK-001"
+        }
+      }
+    ]
+  };
+}
+
+function makeProof() {
+  return {
+    run_id: "run-001",
+    proof_packet: {
+      packet_version: "1.0"
+    },
+    proof_hash: "a".repeat(64),
+    ledger_entry_hash: "b".repeat(64)
+  };
+}
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBootstrap();
-    mockedApiClient.getEvents.mockResolvedValue({
-      run_id: "run-001",
-      events: [
-        {
-          index: 0,
-          event_type: "AGENT_PROPOSED",
-          run_id: "run-001",
-          title: "Agent Proposed",
-          detail: "The agent proposed a payment.",
-          payload: {}
-        }
-      ]
-    });
+    mockedApiClient.getEvents.mockResolvedValue(makeTimeline());
+    mockedApiClient.getProof.mockResolvedValue(makeProof());
     mockedApiClient.verifyRun.mockResolvedValue({
       run_id: "run-001",
       ledger_chain_valid: true,

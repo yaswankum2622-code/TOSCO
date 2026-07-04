@@ -1,3 +1,5 @@
+import { motion, useReducedMotion } from "framer-motion";
+
 import type { ScenarioMetadata } from "../api/types";
 
 interface ScenarioSwitcherProps {
@@ -21,6 +23,8 @@ function ScenarioSwitcher({
   onRunScenario,
   onReset
 }: ScenarioSwitcherProps) {
+  const shouldReduceMotion = useReducedMotion();
+
   return (
     <section className="panel" aria-labelledby="scenario-switcher-heading">
       <div className="panel__header">
@@ -33,9 +37,11 @@ function ScenarioSwitcher({
         {scenarios.map((scenario) => {
           const isActive = activeScenario === scenario.scenario;
           return (
-            <article
+            <motion.article
               key={scenario.scenario}
               className={`scenario-card ${isActive ? "scenario-card--active" : ""}`}
+              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
+              transition={{ duration: 0.16 }}
             >
               <div className="scenario-card__meta">
                 <span className="scenario-card__eyebrow">{scenario.scenario}</span>
@@ -59,7 +65,7 @@ function ScenarioSwitcher({
               >
                 {BUTTON_LABELS[scenario.scenario] ?? `Run ${scenario.title}`}
               </button>
-            </article>
+            </motion.article>
           );
         })}
       </div>

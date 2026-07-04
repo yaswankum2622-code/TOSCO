@@ -1,4 +1,6 @@
 import type { RunSummaryResponse, VerifyRunResponse } from "../api/types";
+import HashDisplay from "./HashDisplay";
+import { yesNo } from "../utils/format";
 
 interface ProofVerifierProps {
   run: RunSummaryResponse | null;
@@ -18,15 +20,9 @@ function ProofVerifier({ run, verification, onVerify, onTamper }: ProofVerifierP
           {verification ? (verification.verified ? "Verified" : "Compromised") : "Awaiting check"}
         </span>
       </div>
-      <div className="hash-stack">
-        <div>
-          <span className="kv-label">Proof hash</span>
-          <code>{run?.proof_hash ?? "Unavailable until a run is active"}</code>
-        </div>
-        <div>
-          <span className="kv-label">Ledger hash</span>
-          <code>{run?.ledger_entry_hash ?? "Unavailable until a run is active"}</code>
-        </div>
+      <div className="hash-stack hash-stack--compact">
+        <HashDisplay label="Proof hash" value={run?.proof_hash} />
+        <HashDisplay label="Ledger hash" value={run?.ledger_entry_hash} />
       </div>
       <div className="kv-grid">
         <div>
@@ -37,11 +33,11 @@ function ProofVerifier({ run, verification, onVerify, onTamper }: ProofVerifierP
         </div>
         <div>
           <span className="kv-label">Ledger chain valid</span>
-          <span className="kv-value">{verification ? String(verification.ledger_chain_valid) : "not_checked"}</span>
+          <span className="kv-value">{verification ? yesNo(verification.ledger_chain_valid) : "—"}</span>
         </div>
         <div>
           <span className="kv-label">Packet entry valid</span>
-          <span className="kv-value">{verification ? String(verification.packet_entry_valid) : "not_checked"}</span>
+          <span className="kv-value">{verification ? yesNo(verification.packet_entry_valid) : "—"}</span>
         </div>
       </div>
       <div className="button-row">
