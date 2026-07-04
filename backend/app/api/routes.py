@@ -7,12 +7,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
+from app.config import load_settings_from_env
 from app.api.schemas import (
     EventTimelineResponse,
     ProofPacketResponse,
     RunSummaryResponse,
     StartRunRequest,
     VerifyRunResponse,
+    VultrStatusResponse,
     run_to_summary,
 )
 from app.api.state import ApiStateError, InMemoryApiState
@@ -141,11 +143,26 @@ def start_run(
     """Start one scenario run using the shared in-memory ledger."""
 
     try:
-        record = state.start_run(payload.scenario)
+        record = state.start_run(payload.scenario, use_vultr=payload.use_vultr)
     except ApiStateError as exc:
         _raise_state_error(exc)
 
     return run_to_summary(record.orchestrated_run)
+
+
+@router.get("/integrations/vultr/status", response_model=VultrStatusResponse)
+def get_vultr_status() -> VultrStatusResponse:
+    """Expose safe Vultr configuration status without leaking the API key."""
+
+    settings = load_settings_from_env()
+    key_present = settings.vultr_api_key is not None and bool(settings.vultr_api_key.strip())
+    return VultrStatusResponse(
+        configured=key_present,
+        base_url=settings.vultr_inference_base_url,
+        model=settings.vultr_chat_model,
+        mode="serverless-inference",
+        key_present=key_present,
+    )
 
 
 @router.get("/runs", response_model=list[RunSummaryResponse])

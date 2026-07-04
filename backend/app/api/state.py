@@ -60,6 +60,8 @@ class InMemoryApiState:
         self,
         scenario: str,
         config: OrchestratorConfig | None = None,
+        *,
+        use_vultr: bool = False,
     ) -> ApiRunRecord:
         """Start one orchestrated run and store it by deterministic run_id."""
 
@@ -88,8 +90,18 @@ class InMemoryApiState:
                 status_code=400,
             )
 
+        active_config = (
+            OrchestratorConfig(use_vultr=use_vultr)
+            if config is None
+            else config.model_copy(update={"use_vultr": use_vultr})
+        )
+
         try:
-            orchestrated_run = run_scenario(normalized_scenario, config=config, ledger=self.ledger)
+            orchestrated_run = run_scenario(
+                normalized_scenario,
+                config=active_config,
+                ledger=self.ledger,
+            )
         except OrchestratorError as exc:
             raise ApiStateError(
                 "The backend could not start the requested run.",

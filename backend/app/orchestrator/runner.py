@@ -7,7 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationInfo, computed_field, field_validator
 
-from app.agent.reference_ap_agent import AgentProposal, ReferenceAPAgent, build_run_context_from_agent_proposal
+from app.agent.reference_ap_agent import (
+    AgentProposal,
+    ReferenceAPAgent,
+    build_run_context_from_agent_proposal,
+)
+from app.config import load_settings_from_env
 from app.engine.ledger import HashLedger, LedgerEntry
 from app.engine.mock_bank import (
     MockBankExecutionResult,
@@ -19,6 +24,7 @@ from app.engine.pipeline import ClearanceOutcome, run_clearance
 from app.engine.proof import ProofPacket, create_proof_packet
 from app.engine.token import ClearanceToken, TokenError, issue_clearance_token
 from app.engine.workflow import load_workflow_definition
+from app.integrations.vultr import VultrExtractionResult, VultrInferenceClient, VultrSettings
 from app.models import Decision, RunContext, WorkflowDefinition
 from app.orchestrator.events import EventType, EventTimeline, TimelineBuilder
 from app.scenarios.loader import ScenarioLoadError, ScenarioSeed, load_scenario_seed
@@ -47,6 +53,8 @@ class OrchestratorConfig(BaseModel):
     issued_at: str = "2026-07-04T12:00:00Z"
     expires_at: str = "2026-07-04T12:10:00Z"
     now: str = "2026-07-04T12:05:00Z"
+    use_vultr: bool = False
+    vultr_fallback_enabled: bool = True
 
     @field_validator("workflow_path", "token_secret", "issued_at", "expires_at", "now")
     @classmethod
@@ -110,7 +118,11 @@ def _resolve_workflow_path(path_value: str) -> Path:
     raise OrchestratorError(f"Workflow path not found: {path_value}")
 
 
-def _tool_event_payload(workflow: WorkflowDefinition, run_context: RunContext, tool_id: str) -> dict[str, Any]:
+def _tool_event_payload(
+    workflow: WorkflowDefinition,
+    run_context: RunContext,
+    tool_id: str,
+) -> dict[str, Any]:
     """Build deterministic simulated tool payloads for the event timeline."""
 
     del workflow
@@ -121,11 +133,148 @@ def _tool_event_payload(workflow: WorkflowDefinition, run_context: RunContext, t
     }
 
 
+def _required_extraction_fields(workflow: WorkflowDefinition) -> list[str]:
+    """Read required extraction fields from the loaded workflow definition."""
+
+    fields = workflow.extraction_schema.get("required_fields", [])
+    return [field for field in fields if isinstance(field, str) and field.strip()]
+
+
+def _vultr_model_name(vultr_client: Any) -> str:
+    """Read a model label from a real or fake Vultr client."""
+
+    settings = getattr(vultr_client, "settings", None)
+    model_name = getattr(settings, "chat_model", None)
+    if isinstance(model_name, str) and model_name.strip():
+        return model_name.strip()
+    return "unknown"
+
+
+def _vultr_fallback_enabled(active_config: OrchestratorConfig, vultr_client: Any) -> bool:
+    """Resolve whether the orchestrator may fall back after a Vultr extraction failure."""
+
+    settings = getattr(vultr_client, "settings", None)
+    client_flag = getattr(settings, "fallback_enabled", active_config.vultr_fallback_enabled)
+    return active_config.vultr_fallback_enabled and bool(client_flag)
+
+
+def _build_vultr_client(active_config: OrchestratorConfig) -> VultrInferenceClient:
+    """Create a Vultr client from environment settings only when the caller opts in."""
+
+    app_settings = load_settings_from_env()
+    return VultrInferenceClient(
+        VultrSettings(
+            api_key=app_settings.vultr_api_key,
+            base_url=app_settings.vultr_inference_base_url,
+            chat_model=app_settings.vultr_chat_model,
+            fallback_enabled=active_config.vultr_fallback_enabled and app_settings.tosco_fallback,
+        )
+    )
+
+
+def _build_run_context(
+    seed: ScenarioSeed,
+    proposal: AgentProposal,
+    *,
+    extraction_fields: dict[str, Any] | None = None,
+    source_spans: dict[str, list[int]] | None = None,
+    extractor: str = "sandbox-fallback",
+    fallback_mode: bool = True,
+) -> RunContext:
+    """Build a RunContext using either seeded or adapter-provided extraction content."""
+
+    return build_run_context_from_agent_proposal(
+        seed,
+        proposal,
+        extraction_fields=extraction_fields,
+        source_spans=source_spans,
+        extractor=extractor,
+        fallback_mode=fallback_mode,
+    )
+
+
+def _resolve_run_context(
+    *,
+    seed: ScenarioSeed,
+    proposal: AgentProposal,
+    workflow: WorkflowDefinition,
+    active_config: OrchestratorConfig,
+    timeline_builder: TimelineBuilder,
+    vultr_client: VultrInferenceClient | None,
+) -> RunContext:
+    """Choose seeded or Vultr-backed extraction while preserving deterministic fallback."""
+
+    if not active_config.use_vultr:
+        return _build_run_context(seed, proposal)
+
+    required_fields = _required_extraction_fields(workflow)
+    active_vultr_client = vultr_client
+    if active_vultr_client is None:
+        try:
+            active_vultr_client = _build_vultr_client(active_config)
+        except Exception as exc:  # pragma: no cover - defensive config guard
+            raise OrchestratorError(f"Vultr configuration could not be loaded: {exc}") from exc
+
+    timeline_builder.add(
+        EventType.VULTR_EXTRACTION_STARTED.value,
+        "Vultr Extraction Started",
+        "TOSCO requested extraction-only structured fields from Vultr Serverless Inference.",
+        {
+            "model": _vultr_model_name(active_vultr_client),
+            "required_fields": required_fields,
+        },
+    )
+
+    extraction_result: VultrExtractionResult = active_vultr_client.extract_vendor_payment_fields(
+        evidence=seed.evidence,
+        required_fields=required_fields,
+    )
+    if extraction_result.ok:
+        timeline_builder.add(
+            EventType.VULTR_EXTRACTION_SUCCEEDED.value,
+            "Vultr Extraction Succeeded",
+            "Vultr returned structured extraction data, which TOSCO sealed before gating.",
+            {
+                "model": extraction_result.model,
+                "field_names": sorted(extraction_result.fields.keys()),
+                "raw_content_hash": extraction_result.raw_content_hash,
+            },
+        )
+        return _build_run_context(
+            seed,
+            proposal,
+            extraction_fields=extraction_result.fields,
+            source_spans=extraction_result.source_spans,
+            extractor="vultr-serverless-inference",
+            fallback_mode=False,
+        )
+
+    if not _vultr_fallback_enabled(active_config, active_vultr_client):
+        raise OrchestratorError(
+            "Vultr extraction failed and fallback is disabled: "
+            f"{extraction_result.error_code or 'UNKNOWN_ERROR'}"
+        )
+
+    timeline_builder.add(
+        EventType.VULTR_EXTRACTION_FALLBACK.value,
+        "Vultr Extraction Fallback",
+        "Vultr extraction failed, so TOSCO fell back to the seeded deterministic extraction.",
+        {
+            "model": extraction_result.model,
+            "error_code": extraction_result.error_code,
+            "error_message": extraction_result.error_message,
+            "fallback_used": True,
+        },
+    )
+    return _build_run_context(seed, proposal, fallback_mode=True)
+
+
 def run_scenario(
     scenario: str,
     *,
     config: OrchestratorConfig | None = None,
     ledger: HashLedger | None = None,
+    vultr_client: VultrInferenceClient | None = None,
 ) -> OrchestratedRun:
     """Run one demo scenario through proposal, clearance, proof, token, and execution."""
 
@@ -147,13 +296,8 @@ def run_scenario(
 
     agent = ReferenceAPAgent()
     proposal = agent.propose_from_seed(seed)
-    run_context = build_run_context_from_agent_proposal(seed, proposal)
-    if run_context.workflow_id != workflow.workflow_id:
-        raise OrchestratorError(
-            f"RunContext workflow_id '{run_context.workflow_id}' does not match workflow '{workflow.workflow_id}'"
-        )
 
-    timeline_builder = TimelineBuilder(run_context.run_id)
+    timeline_builder = TimelineBuilder(seed.run_id)
     timeline_builder.add(
         EventType.AGENT_PROPOSED.value,
         "Agent Proposed Payment",
@@ -181,10 +325,24 @@ def run_scenario(
         "Evidence Retrieved",
         "Seeded evidence was loaded for the clearance run.",
         {
-            "evidence_types": sorted(run_context.evidence.keys()),
-            "evidence_count": len(run_context.evidence),
+            "evidence_types": sorted(seed.evidence.keys()),
+            "evidence_count": len(seed.evidence),
         },
     )
+
+    run_context = _resolve_run_context(
+        seed=seed,
+        proposal=proposal,
+        workflow=workflow,
+        active_config=active_config,
+        timeline_builder=timeline_builder,
+        vultr_client=vultr_client,
+    )
+    if run_context.workflow_id != workflow.workflow_id:
+        raise OrchestratorError(
+            f"RunContext workflow_id '{run_context.workflow_id}' does not match workflow '{workflow.workflow_id}'"
+        )
+
     timeline_builder.add(
         EventType.EXTRACTION_STARTED.value,
         "Extraction Review Started",
@@ -197,7 +355,7 @@ def run_scenario(
         "The extraction boundary was sealed before gates evaluated typed facts.",
         {
             "extraction_hash": run_context.extraction.sealed_hash() if run_context.extraction else None,
-            "required_fields": list(workflow.extraction_schema.get("required_fields", [])),
+            "required_fields": _required_extraction_fields(workflow),
         },
     )
 

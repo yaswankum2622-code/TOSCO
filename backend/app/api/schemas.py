@@ -24,6 +24,7 @@ class StartRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scenario: str
+    use_vultr: bool = False
 
     @field_validator("scenario")
     @classmethod
@@ -131,6 +132,25 @@ class ErrorResponse(BaseModel):
     @classmethod
     def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
         """Reject blank error fields."""
+
+        return _require_non_empty(value, info.field_name)
+
+
+class VultrStatusResponse(BaseModel):
+    """Safe integration-status payload that never exposes a raw API key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    base_url: str
+    model: str
+    mode: str
+    key_present: bool
+
+    @field_validator("base_url", "model", "mode")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
+        """Reject blank Vultr status metadata."""
 
         return _require_non_empty(value, info.field_name)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
 from app.models import ActionIntent, RunContext, SealedExtraction
@@ -93,6 +95,11 @@ class ReferenceAPAgent:
 def build_run_context_from_agent_proposal(
     seed: ScenarioSeed,
     proposal: AgentProposal,
+    *,
+    extraction_fields: dict[str, Any] | None = None,
+    source_spans: dict[str, list[int]] | None = None,
+    extractor: str = "sandbox-fallback",
+    fallback_mode: bool = True,
 ) -> RunContext:
     """Convert an agent proposal plus seed data into a deterministic RunContext."""
 
@@ -103,8 +110,9 @@ def build_run_context_from_agent_proposal(
 
     extraction = SealedExtraction(
         doc_id=seed.evidence.get("invoice", {}).get("doc_id", f"{seed.scenario}-invoice"),
-        fields=seed.extraction_fields,
-        source_spans=seed.source_spans,
+        fields=seed.extraction_fields if extraction_fields is None else extraction_fields,
+        source_spans=seed.source_spans if source_spans is None else source_spans,
+        extractor=extractor,
     )
     return RunContext(
         run_id=seed.run_id,
@@ -113,5 +121,5 @@ def build_run_context_from_agent_proposal(
         extraction=extraction,
         evidence=seed.evidence,
         signals=seed.signals,
-        fallback_mode=True,
+        fallback_mode=fallback_mode,
     )
