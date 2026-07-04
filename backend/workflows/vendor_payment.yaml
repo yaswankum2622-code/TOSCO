@@ -1,0 +1,46 @@
+workflow_id: vendor_payment
+workflow_name: AI Vendor Payment & Bank-Change Clearance
+
+required_evidence_types:
+  - invoice
+  - po
+  - grn
+  - vendor_master
+  - policy_pack
+
+extraction_schema:
+  required_fields:
+    - invoice_id
+    - vendor_name
+    - amount
+    - bank_account_last4
+  optional_fields:
+    - payment_terms
+    - invoice_date
+    - due_date
+    - bank_change_reference
+
+gates_to_run:
+  - G1_EVIDENCE
+  - G2_GROUNDEDNESS
+  - G3_POLICY
+  - G4_RISK
+  - G5_REALITY
+  - G6_DECISION_SEAL
+
+tools_to_call:
+  - policy_tool
+  - risk_tool
+  - duplicate_invoice_check
+  - bank_owner_check
+  - domain_age_check
+  - logistics_check
+
+decision_policy:
+  allow_requires_all_pass: true
+  high_value_threshold: 50000
+  reality_required_above: 50000
+  mandatory_human_confirm: false
+
+proof_packet_template: vendor_payment_proof
+execution_adapter: sandbox
