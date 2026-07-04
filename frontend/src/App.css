@@ -148,7 +148,7 @@ pre,
 
 .top-row {
   display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
+  grid-template-columns: minmax(280px, 0.85fr) minmax(340px, 1fr) minmax(360px, 1.05fr);
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -280,6 +280,10 @@ pre,
   color: #f0b4ae;
 }
 
+.status-error--compact {
+  margin-bottom: 14px;
+}
+
 .workflow-strip-list,
 .tool-rail,
 .gate-chain,
@@ -296,7 +300,8 @@ pre,
 .scenario-card,
 .proposal-card,
 .timeline-event-card,
-.gate-node {
+.gate-node,
+.checklist-item {
   background: var(--panel-2);
   border: 1px solid rgba(233, 228, 216, 0.08);
   border-radius: 8px;
@@ -323,6 +328,10 @@ pre,
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.vultr-status-card__wide {
+  grid-column: 1 / -1;
 }
 
 .workflow-strip__metrics {
@@ -593,6 +602,116 @@ pre,
   font-size: 0.78rem;
 }
 
+.vultr-status-card {
+  background:
+    linear-gradient(135deg, rgba(73, 148, 255, 0.08), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 100%),
+    var(--panel);
+}
+
+.vultr-status-card--ready {
+  border-color: rgba(73, 148, 255, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(73, 148, 255, 0.08),
+    var(--shadow);
+}
+
+.vultr-status-card--fallback {
+  border-color: rgba(216, 155, 43, 0.28);
+  box-shadow:
+    inset 0 0 0 1px rgba(216, 155, 43, 0.08),
+    var(--shadow);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 18px;
+  color: rgba(247, 242, 232, 0.88);
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #4d94ff;
+}
+
+.demo-control-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.control-button-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.control-button {
+  min-height: 54px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.final-demo-checklist {
+  display: grid;
+  gap: 14px;
+}
+
+.checklist-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  align-items: center;
+}
+
+.checklist-item--complete {
+  border-color: rgba(46, 125, 91, 0.38);
+}
+
+.checklist-item__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: 6px;
+  border: 1px solid rgba(233, 228, 216, 0.12);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.checklist-item--complete .checklist-item__marker {
+  border-color: rgba(46, 125, 91, 0.4);
+  color: #7cd4a9;
+  background: rgba(46, 125, 91, 0.12);
+}
+
+.checklist-item__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.checklist-item__copy strong {
+  font-size: 0.95rem;
+}
+
+.checklist-item__copy small {
+  color: var(--muted);
+}
+
 .proof-seal--broken {
   border-color: rgba(192, 57, 43, 0.48);
   box-shadow: inset 0 0 0 1px rgba(192, 57, 43, 0.14);
@@ -621,6 +740,18 @@ pre,
 
 .timeline-event-card--highlight {
   border-color: rgba(185, 138, 47, 0.4);
+}
+
+.timeline-event-card--integration {
+  border-color: rgba(73, 148, 255, 0.28);
+}
+
+.timeline-event-card--success {
+  border-color: rgba(46, 125, 91, 0.38);
+}
+
+.timeline-event-card--fallback {
+  border-color: rgba(216, 155, 43, 0.4);
 }
 
 .timeline-event-card__meta {
@@ -675,6 +806,10 @@ pre,
   }
 
   .timeline-list {
+    grid-template-columns: 1fr;
+  }
+
+  .control-button-grid {
     grid-template-columns: 1fr;
   }
 }

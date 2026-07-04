@@ -35,6 +35,11 @@ export interface RunSummaryResponse {
   timeline_events_count: number;
 }
 
+export interface StartRunRequest {
+  scenario: string;
+  use_vultr?: boolean;
+}
+
 export interface OrchestratorEvent {
   index: number;
   event_type: string;
@@ -68,4 +73,12 @@ export interface VerifyRunResponse {
 export interface ResetResponse {
   status: string;
   runs: number;
+}
+
+export interface VultrStatusResponse {
+  configured: boolean;
+  base_url: string;
+  model: string;
+  mode: string;
+  key_present: boolean;
 }

@@ -1,6 +1,6 @@
 export function shortHash(value: string | undefined, start = 10, end = 8): string {
   if (!value) {
-    return "—";
+    return "-";
   }
 
   if (value.length <= start + end + 3) {
@@ -12,7 +12,7 @@ export function shortHash(value: string | undefined, start = 10, end = 8): strin
 
 export function formatMoney(amount: number | undefined, currency = "USD"): string {
   if (typeof amount !== "number" || !Number.isFinite(amount)) {
-    return "—";
+    return "-";
   }
 
   return new Intl.NumberFormat("en-US", {
@@ -48,5 +48,5 @@ export function yesNo(value: boolean | undefined): string {
     return "No";
   }
 
-  return "—";
+  return "-";
 }

@@ -58,7 +58,34 @@ describe("apiClient", () => {
       "http://127.0.0.1:8000/api/runs/start",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ scenario: "clean" })
+        body: JSON.stringify({ scenario: "clean", use_vultr: false })
+      })
+    );
+  });
+
+  it("getVultrStatus calls the integration status endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          configured: false,
+          base_url: "https://api.vultrinference.com/v1",
+          model: "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16",
+          mode: "serverless-inference",
+          key_present: false
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    await apiClient.getVultrStatus();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/integrations/vultr/status",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" }
       })
     );
   });

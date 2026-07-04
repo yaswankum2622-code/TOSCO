@@ -9,21 +9,24 @@ import type {
   RunSummaryResponse,
   ScenarioMetadata,
   VerifyRunResponse,
+  VultrStatusResponse,
   WorkflowMetadata
 } from "./api/types";
 import AgentProposalPanel from "./components/AgentProposalPanel";
 import BackendStatus from "./components/BackendStatus";
 import CounterfactualStrip from "./components/CounterfactualStrip";
 import DecisionHero from "./components/DecisionHero";
+import DemoControlPanel from "./components/DemoControlPanel";
 import EvidenceRail from "./components/EvidenceRail";
 import EventTimeline from "./components/EventTimeline";
+import FinalDemoChecklist from "./components/FinalDemoChecklist";
 import GateChain from "./components/GateChain";
 import Header from "./components/Header";
 import MockBankCard from "./components/MockBankCard";
 import ProofSeal from "./components/ProofSeal";
-import ProofVerifier from "./components/ProofVerifier";
 import ScenarioSwitcher from "./components/ScenarioSwitcher";
 import ToolCallRail from "./components/ToolCallRail";
+import VultrStatusCard from "./components/VultrStatusCard";
 import WorkflowStrip from "./components/WorkflowStrip";
 
 function formatError(error: unknown): string {
@@ -40,46 +43,78 @@ function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowMetadata[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioMetadata[]>([]);
+  const [vultrStatus, setVultrStatus] = useState<VultrStatusResponse | null>(null);
   const [activeRun, setActiveRun] = useState<RunSummaryResponse | null>(null);
   const [timeline, setTimeline] = useState<EventTimelineResponse | null>(null);
   const [proof, setProof] = useState<ProofPacketResponse | null>(null);
   const [verification, setVerification] = useState<VerifyRunResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [vultrLoading, setVultrLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [vultrError, setVultrError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [useVultr, setUseVultr] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
       setLoading(true);
+      setVultrLoading(true);
       setBackendError(null);
+      setVultrError(null);
       setError(null);
 
       try {
-        const [healthResponse, workflowResponse, scenarioResponse] = await Promise.all([
+        const [healthResponse, workflowResponse, scenarioResponse, vultrStatusResponse] =
+          await Promise.allSettled([
           apiClient.getHealth(),
           apiClient.getWorkflows(),
-          apiClient.getScenarios()
+          apiClient.getScenarios(),
+          apiClient.getVultrStatus()
         ]);
 
         if (cancelled) {
           return;
         }
 
-        setHealth(healthResponse);
-        setWorkflows(workflowResponse);
-        setScenarios(scenarioResponse);
-      } catch (bootstrapError) {
-        if (!cancelled) {
-          const message = formatError(bootstrapError);
+        const bootstrapErrors: string[] = [];
+
+        if (healthResponse.status === "fulfilled") {
+          setHealth(healthResponse.value);
+        } else {
+          bootstrapErrors.push(formatError(healthResponse.reason));
+        }
+
+        if (workflowResponse.status === "fulfilled") {
+          setWorkflows(workflowResponse.value);
+        } else {
+          bootstrapErrors.push(formatError(workflowResponse.reason));
+        }
+
+        if (scenarioResponse.status === "fulfilled") {
+          setScenarios(scenarioResponse.value);
+        } else {
+          bootstrapErrors.push(formatError(scenarioResponse.reason));
+        }
+
+        if (vultrStatusResponse.status === "fulfilled") {
+          setVultrStatus(vultrStatusResponse.value);
+        } else {
+          setVultrStatus(null);
+          setVultrError(formatError(vultrStatusResponse.reason));
+        }
+
+        if (bootstrapErrors.length > 0) {
+          const message = bootstrapErrors.join(" ");
           setBackendError(message);
           setError(message);
         }
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setVultrLoading(false);
         }
       }
     }
@@ -105,7 +140,7 @@ function App() {
     setError(null);
 
     try {
-      const run = await apiClient.startRun(scenario);
+      const run = await apiClient.startRun(scenario, useVultr);
 
       setActiveRun(run);
       setTimeline(null);
@@ -208,6 +243,13 @@ function App() {
 
       <div className="top-row">
         <BackendStatus health={health} loading={loading} error={backendError} />
+        <VultrStatusCard
+          status={vultrStatus}
+          loading={vultrLoading}
+          error={vultrError}
+          useVultr={useVultr}
+          onToggleUseVultr={setUseVultr}
+        />
         <WorkflowStrip workflows={workflows} activeRun={displayRun} />
       </div>
 
@@ -252,13 +294,21 @@ function App() {
         <section className="command-column">
           <EvidenceRail timeline={timeline} />
           <ProofSeal run={displayRun} verification={verification} />
-          <ProofVerifier
-            run={displayRun}
+          <DemoControlPanel
+            activeRun={displayRun}
             verification={verification}
             onVerify={handleVerify}
             onTamper={handleTamper}
+            onReset={handleReset}
+            loading={running}
           />
           <MockBankCard run={displayRun} timeline={timeline} />
+          <FinalDemoChecklist
+            activeRun={displayRun}
+            timeline={timeline}
+            verification={verification}
+            vultrStatus={vultrStatus}
+          />
         </section>
       </main>
 

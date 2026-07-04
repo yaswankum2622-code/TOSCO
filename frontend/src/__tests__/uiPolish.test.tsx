@@ -16,6 +16,7 @@ vi.mock("../api/client", () => ({
   },
   apiClient: {
     getHealth: vi.fn(),
+    getVultrStatus: vi.fn(),
     getWorkflows: vi.fn(),
     getScenarios: vi.fn(),
     startRun: vi.fn(),
@@ -328,6 +329,13 @@ function bootstrap() {
     version: "0.1.0",
     mode: "demo"
   });
+  mockedApiClient.getVultrStatus.mockResolvedValue({
+    configured: false,
+    base_url: "https://api.vultrinference.com/v1",
+    model: "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16",
+    mode: "serverless-inference",
+    key_present: false
+  });
   mockedApiClient.getWorkflows.mockResolvedValue(workflows);
   mockedApiClient.getScenarios.mockResolvedValue(scenarios);
   mockedApiClient.resetDemo.mockResolvedValue({ status: "reset", runs: 0 });
@@ -361,7 +369,7 @@ describe("ui polish", () => {
     expect(await screen.findByTestId("final-decision")).toHaveTextContent("ALLOW");
     expect(screen.getAllByText("Yes").length).toBeGreaterThan(0);
     expect(screen.getAllByText("EXECUTION_ACCEPTED").length).toBeGreaterThan(0);
-    expect(screen.getByText("aaaaaaaaaa...aaaaaaaa")).toBeInTheDocument();
+    expect(screen.getAllByText("aaaaaaaaaaaa...aaaaaaaaaa").length).toBeGreaterThan(0);
   });
 
   it("after injection run displays block, bank mismatch, and rejected token state", async () => {
@@ -404,7 +412,7 @@ describe("ui polish", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Run Clean Payment" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Tamper Demo" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Tamper Ledger" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("verified-value")).toHaveTextContent("false");

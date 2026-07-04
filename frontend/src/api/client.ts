@@ -5,7 +5,9 @@ import type {
   ResetResponse,
   RunSummaryResponse,
   ScenarioMetadata,
+  StartRunRequest,
   VerifyRunResponse,
+  VultrStatusResponse,
   WorkflowMetadata
 } from "./types";
 
@@ -58,12 +60,16 @@ async function requestJson<T>(path: string, options: JsonRequestOptions = {}): P
 
 export const apiClient = {
   getHealth: () => requestJson<HealthResponse>("/api/health"),
+  getVultrStatus: () => requestJson<VultrStatusResponse>("/api/integrations/vultr/status"),
   getWorkflows: () => requestJson<WorkflowMetadata[]>("/api/workflows"),
   getScenarios: () => requestJson<ScenarioMetadata[]>("/api/scenarios"),
-  startRun: (scenario: string) =>
+  startRun: (scenario: string, useVultr?: boolean) =>
     requestJson<RunSummaryResponse>("/api/runs/start", {
       method: "POST",
-      body: JSON.stringify({ scenario })
+      body: JSON.stringify({
+        scenario,
+        use_vultr: useVultr ?? false
+      } satisfies StartRunRequest)
     }),
   listRuns: () => requestJson<RunSummaryResponse[]>("/api/runs"),
   getRun: (runId: string) => requestJson<RunSummaryResponse>(`/api/runs/${runId}`),
