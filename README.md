@@ -1,158 +1,214 @@
-# TOSCO — Trust-Orchestrated Settlement & Control OS
+# TOSCO — Trusted Orchestration & Settlement Clearance Operator
 
-**Agents propose. TOSCO clears. Execution obeys. Audit proves.**
+**The clearance layer for AI-driven financial actions.**
 
-![TOSCO Clearance Console](docs/screenshots/FRONT%20VIEW.png)
+> Agents propose. TOSCO clears. Execution obeys. Audit proves.
 
-> **204 backend tests · 41 frontend tests · MIT · RAISE Summit 2026 (Vultr Track)**
+![Backend tests](https://img.shields.io/badge/backend-204%20tests%20passed-22c55e?style=flat-square)
+![Frontend tests](https://img.shields.io/badge/frontend-41%20tests%20passed-22c55e?style=flat-square)
+![Vultr smoke](https://img.shields.io/badge/live%20Vultr%20smoke-passed-38bdf8?style=flat-square)
+![Stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React%20%2B%20Vultr-6366f1?style=flat-square)
+![Status](https://img.shields.io/badge/status-hackathon%20build-f59e0b?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square)
+
+TOSCO sits between AI agents and financial execution. A reference AP agent can propose a vendor payment, but it **cannot execute**. TOSCO independently validates evidence, seals extraction, runs deterministic gates, creates a Proof Packet, appends it to a SHA-256 ledger, issues a clearance token only for **ALLOW**, and lets a Mock Bank execute only when the token matches the payment.
+
+**The model extracts. Deterministic gates decide. Every decision becomes a verifiable Proof Packet.**
+
+---
+
+## Demo Preview
+
+![TOSCO Front View](docs/assets/front-view.png)
+
+| Clean ALLOW | Prompt Injection BLOCK | Forged Bank FREEZE | Event Log |
+|:---:|:---:|:---:|:---:|
+| ![Clean Allow Flow](docs/assets/clean-allow.png) | ![Prompt Injection Block](docs/assets/prompt-injection-block.png) | ![Forged Bank Freeze](docs/assets/forged-bank-freeze.png) | ![Event Log](docs/assets/event-log.png) |
+
+---
+
+## In 10 Seconds
+
+| Layer | What happens |
+|-------|--------------|
+| **AI Agent** | Proposes payment |
+| **Vultr** | Extracts structured fields |
+| **TOSCO Gates** | Deterministically approve / block / freeze |
+| **Proof Packet** | Records evidence hashes and decision |
+| **Ledger** | Makes outcome tamper-evident |
+| **Clearance Token** | Allows execution only if decision is ALLOW |
+| **Mock Bank** | Executes only with valid token |
 
 ---
 
 ## The Problem
 
-AI agents are moving money — and the agent itself has become the attack surface. Business email compromise, prompt injection, forged invoices, and bank-account substitution all exploit the same gap: **the model proposes, but nothing deterministic stands between proposal and payment.**
+AI agents are starting to read invoices, purchase orders, GRNs, and vendor records. If they are allowed to initiate payments directly, **the agent becomes the attack surface**.
 
-Enterprises need a clearance layer that treats LLM output as untrusted input until evidence, policy, reality checks, and cryptographic proof say otherwise.
+| Threat | Example |
+|--------|---------|
+| Prompt injection inside invoices | Hidden text redirects `$340,000` to attacker account |
+| Bank account substitution | Document shows wrong last-4 digits |
+| Forged bank-change chain | Internally consistent fake documents |
+| Duplicate invoice risk | Same invoice resubmitted |
+| Missing evidence | PO or GRN absent |
+| Unauthorized execution | Agent bypasses clearance layer |
 
----
-
-## What TOSCO Does
-
-| Stage | What happens |
-|-------|----------------|
-| **Propose** | Reference AP agent submits a payment intent (never executes) |
-| **Extract** | Vultr Serverless Inference structures fields from documents |
-| **Gate** | Five deterministic gates (G1–G5) + decision seal (G6) evaluate evidence, policy, risk, and reality |
-| **Decide** | ALLOW · BLOCK · FREEZE — computed in Python, not the LLM |
-| **Token** | HMAC-signed clearance token issued only on ALLOW |
-| **Prove** | SHA-256 hash-chained Proof Packet appended to the ledger |
-| **Enforce** | Mock Bank executes only with a valid token matching vendor + amount |
-
-**The LLM extracts. The math decides.**
+> **A clean-looking document chain should not be enough to move money.**
 
 ---
 
-## Demo (60s)
+## The Solution
 
-**Video:** *[1-minute demo — link placeholder]*
+TOSCO separates **extraction** from **authority**.
 
-| Scenario | Screenshot | Outcome |
-|----------|------------|---------|
-| Clean payment | ![Clean ALLOW](docs/screenshots/RCP-1.png) | ALLOW → token → bank accepted |
-| Prompt injection | ![Injection BLOCK](docs/screenshots/RPI-1.png) | BLOCK → $340k stopped → no token |
-| Proof & tamper | ![Proof chain](docs/screenshots/RCP-3.png) | SHA-256 chain · live verify · tamper fails |
-
-Additional captures in [`docs/screenshots/`](docs/screenshots/):
-
-- `FRONT VIEW.png` — full clearance console
-- `RCP-2.png`, `RCP-3.png` — clean run progression
-- `RPI-2.png`, `RPI-3.png` — injection blocked
-- `FB-1.png`, `FB-2.png`, `FB-3.png` — forged bank-change FREEZE
-- `CUSTOM RUN.png`, `CUSTOM RUN-2.png`, `CUSTOM RUN-3.png` — custom adversarial input
-- `EVENT LOG.png` — live SSE event stream
+| | |
+|---|---|
+| The model **may extract** | Vultr returns schema-bound fields |
+| The agent **may propose** | Reference AP agent never executes |
+| **Deterministic gates decide** | G1–G6 in Python — not the LLM |
+| **Execution requires a token** | HMAC-signed clearance mandate |
+| **Every decision is provable** | SHA-256 hash-chained Proof Packet |
 
 ---
 
-## Try It Yourself — Custom Run
+## Why This Is Not Another Finance Agent
 
-Submit your own vendor, amount, and attack narrative. Watch TOSCO clear or block it live — extraction, gates, token, and proof chain update in real time.
-
-![Custom Run](docs/screenshots/CUSTOM%20RUN.png)
+| Common AI Finance Demo | TOSCO |
+|------------------------|-------|
+| Agent reads invoice and decides | Agent **only proposes** |
+| LLM decides approval | **Deterministic gates** decide |
+| RAG answer is the output | **Proof Packet** is the output |
+| No execution boundary | Mock Bank requires clearance token |
+| Documents are trusted | **Reality Gate** checks outside document chain |
+| Logs are passive | **Ledger** is tamper-evident |
 
 ---
 
-## How It Works
+## Demo Scenarios
+
+| Scenario | Attack / Condition | TOSCO Decision | Execution |
+|----------|-------------------|----------------|-----------|
+| **Clean Vendor Payment** | Evidence and reality signals match | **ALLOW** | Token issued · Mock Bank accepted |
+| **Prompt Injection Attack** | Invoice routes payment to attacker account ending `0009` | **BLOCK** | No token · Mock Bank rejected |
+| **Forged Bank Change** | Documents internally consistent but reality signals fail | **FREEZE** | No token · Mock Bank rejected |
+| **Custom Judge Input** | User changes payment / risk / reality fields | Deterministic result | Based on gates |
+
+---
+
+## Architecture
 
 ```text
-PROPOSE → RETRIEVE → EXTRACT → TOOLS → G1–G5 → DECISION
-    → (human REVIEW on high-value) → TOKEN → BANK
+Reference AP Agent
+   ↓ proposes payment
+Scenario Evidence / Vultr Extraction Adapter
+   ↓ sealed structured extraction
+TOSCO Gate Engine
+   ↓ six deterministic gates
+Decision Engine
+   ↓
+ProofPacket + SHA-256 Ledger
+   ↓
+HMAC Clearance Token
+   ↓
+Mock Bank Enforcement
+   ↓
+Clearance Terminal UI
 ```
 
-**Pipeline stations (Clearance Spine)**
+### Gate chain
 
-1. **PROPOSE** — agent intent, no execution authority  
-2. **RETRIEVE** — seeded evidence bundle (invoice, PO, GRN, vendor master, policy)  
-3. **EXTRACT** — Vultr Serverless Inference → typed, schema-bound fields  
-4. **TOOLS** — simulated enterprise signals (policy, risk, domain age, duplicates)  
-5. **G1 Evidence** · **G2 Groundedness** · **G3 Policy** · **G4 Risk** · **G5 Reality**  
-6. **DECISION** — ALLOW / BLOCK / FREEZE  
-7. **REVIEW** — optional human gate on high-value runs  
-8. **TOKEN** — HMAC clearance token (ALLOW only)  
-9. **BANK** — mock-bank enforcement  
-10. **PROOF** — SHA-256 hash-chained Proof Packet + tamper-verify  
+| Gate | Checks |
+|------|--------|
+| **G1 Evidence** | Required documents present |
+| **G2 Groundedness** | Fields trace to source spans |
+| **G3 Policy** | Business rules and limits |
+| **G4 Risk** | Composite risk scoring |
+| **G5 Reality** | External signals vs. document claims |
+| **G6 Decision Seal** | Final deterministic fold |
 
-**Reality Gate (G5)** compares extracted bank details against authoritative vendor master — catching prompt-injection account swaps even when documents look internally consistent.
-
-**Clearance Token** — HMAC-signed, bound to vendor ID + amount; Mock Bank rejects without it.
-
-**Proof Packet** — every run produces a verifiable chain; tamper-demo corrupts a field and live verify fails immediately.
+Full detail → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ---
 
 ## Vultr Integration
 
-TOSCO uses **[Vultr Serverless Inference](https://www.vultr.com/products/cloud-inference/)** for live structured extraction:
+TOSCO uses **[Vultr Serverless Inference](https://www.vultr.com/products/cloud-inference/)** for live structured extraction.
 
-- Model name and latency surfaced in the event timeline  
-- Honest **local fallback** when `VULTR_API_KEY` is unset — UI shows fallback mode explicitly  
-- Vultr extracts; **TOSCO gates decide** — the model never approves payment  
+| | |
+|---|---|
+| **Vultr does** | Extract typed fields from document text |
+| **Vultr does not** | Approve, block, or move money |
+| **TOSCO decides** | Deterministic gates after extraction |
+| **UI shows** | Model name · latency · fallback mode honestly |
 
-Live smoke-test results: [`results/LIVE_VULTR_PROOF.md`](results/LIVE_VULTR_PROOF.md)
-
----
-
-## Real vs Sandbox (honest)
-
-| REAL | SANDBOX |
-|------|---------|
-| Vultr Serverless Inference extraction | Seeded demo documents |
-| 5 deterministic gates + decision seal | Simulated tool-call signals |
-| HMAC clearance token | No real money movement |
-| Mock-bank token enforcement | External enterprise APIs mocked |
-| SHA-256 proof chain + tamper-verify | No production auth / RBAC |
-| SSE live event stream | No persistent database |
-| Custom adversarial input | No SOC 2 controls yet |
-| Human review gate on high-value runs | |
-
----
-
-## Run Locally
-
-### Backend (port 8010)
+Live verification record → [`docs/LIVE_VULTR_PROOF.md`](docs/LIVE_VULTR_PROOF.md)
 
 ```powershell
 cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python scripts/vultr_live_smoke.py
+# → LIVE VULTR SMOKE TEST PASSED
+```
+
+---
+
+## Real vs Sandbox
+
+| ✅ Real in this build | 🧪 Sandbox / simulated |
+|----------------------|------------------------|
+| Vultr Serverless Inference extraction | Seeded demo documents |
+| 5 deterministic gates + decision seal | Simulated enterprise tool calls |
+| HMAC clearance token | Real payment rails |
+| Mock Bank token enforcement | Production auth / RBAC |
+| SHA-256 proof chain + tamper verify | Persistent database |
+| SSE live event stream | Real money movement |
+| Custom adversarial input | SOC 2 controls |
+
+---
+
+## Try It Yourself
+
+**Custom Run** — submit your own vendor, amount, and attack narrative. Watch extraction, gates, token, and proof chain update live.
+
+```powershell
+# Terminal 1 — backend
+cd backend
+python -m venv .venv && .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
-# Optional: add VULTR_API_KEY to .env for live extraction
-python -m pytest -q
 python -m uvicorn app.api.app:create_app --factory --host 127.0.0.1 --port 8010
-```
 
-Health check: `http://127.0.0.1:8010/api/health`
-
-### Frontend (port 5173)
-
-```powershell
+# Terminal 2 — frontend
 cd frontend
-npm install
-npm run test
-npm run build
-npm run dev
+npm install && npm run dev
 ```
 
-Open `http://127.0.0.1:5173` — Vite proxies `/api` to the backend.
+Open **http://127.0.0.1:5173** · health check **http://127.0.0.1:8010/api/health**
 
-### Live Vultr smoke (optional)
+Optional live Vultr: add `VULTR_API_KEY` to `backend/.env` (never commit).
 
-```powershell
-cd backend
-python scripts\vultr_live_smoke.py
-```
+---
 
-See [`backend/scripts/README.md`](backend/scripts/README.md).
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Backend | Python · FastAPI · Pydantic v2 · pytest |
+| Frontend | React · Vite · TypeScript · Vitest · Framer Motion |
+| Crypto | SHA-256 hash chain · HMAC-SHA256 clearance tokens |
+| Inference | Vultr Serverless Inference (`/v1/chat/completions`) |
+| Transport | REST API · Server-Sent Events |
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design · pipeline · crypto contracts |
+| [`docs/SECURITY_NOTES.md`](docs/SECURITY_NOTES.md) | Threat model · controls · secret handling |
+| [`docs/LIVE_VULTR_PROOF.md`](docs/LIVE_VULTR_PROOF.md) | Live inference verification record |
+| [`docs/01_PRODUCT_VISION.md`](docs/01_PRODUCT_VISION.md) → [`13_OPERATIONS.md`](docs/13_OPERATIONS.md) | Full hackathon doc pack |
 
 ---
 
@@ -160,59 +216,23 @@ See [`backend/scripts/README.md`](backend/scripts/README.md).
 
 ```text
 TOSCO/
-├── LICENSE
 ├── README.md
-├── .gitignore
+├── LICENSE
 ├── docs/
-│   ├── 01_PRODUCT_VISION.md … 13_OPERATIONS.md
-│   ├── DEMO_SCRIPT.md
+│   ├── ARCHITECTURE.md
 │   ├── SECURITY_NOTES.md
-│   ├── TOSCO_PROMPTING_SKILLS.md
-│   └── screenshots/          # UI captures for demo & README
-├── results/
-│   ├── DEEP_AUDIT_REPORT_2026-07-05.md
 │   ├── LIVE_VULTR_PROOF.md
-│   ├── ARCHITECTURE_SUMMARY.md
-│   ├── SUBMISSION.md
-│   └── TOSCO_WORLDCLASS_UPGRADE.md
+│   ├── assets/              # README screenshots
+│   └── 01_…13_*.md          # Full doc pack
 ├── backend/
-│   ├── app/                  # FastAPI application package
-│   ├── tests/
+│   ├── app/                 # FastAPI · engine · orchestrator
+│   ├── tests/               # 204 pytest cases
 │   ├── workflows/
-│   ├── scripts/
-│   ├── .env.example
-│   ├── requirements.txt
-│   └── pytest.ini
+│   ├── scripts/             # vultr_live_smoke.py
+│   └── .env.example
 └── frontend/
-    ├── src/
-    ├── public/
-    ├── package.json
-    ├── vite.config.ts
-    └── tsconfig.json
+    └── src/                 # Clearance Terminal UI
 ```
-
----
-
-## Tech Stack
-
-| Layer | Stack |
-|-------|-------|
-| Backend | Python · FastAPI · Pydantic v2 · pytest |
-| Frontend | React · Vite · TypeScript · Vitest · Framer Motion |
-| Crypto | SHA-256 hash chain · HMAC clearance tokens |
-| Inference | Vultr Serverless Inference (`/v1/chat/completions`) |
-| Transport | SSE event stream · REST API |
-
----
-
-## Documentation
-
-Full doc pack: [`docs/01_PRODUCT_VISION.md`](docs/01_PRODUCT_VISION.md) through [`docs/13_OPERATIONS.md`](docs/13_OPERATIONS.md)
-
-- Architecture: [`docs/04_ARCHITECTURE.md`](docs/04_ARCHITECTURE.md)  
-- API contract: [`docs/05_API_CONTRACT.md`](docs/05_API_CONTRACT.md)  
-- Security model: [`docs/09_SECURITY_AND_THREAT_MODEL.md`](docs/09_SECURITY_AND_THREAT_MODEL.md)  
-- Demo script: [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)  
 
 ---
 
