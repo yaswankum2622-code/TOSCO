@@ -260,7 +260,6 @@ Optional live Vultr: add `VULTR_API_KEY` to `backend/.env` (never commit).
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design · pipeline · crypto contracts |
 | [`docs/SECURITY_NOTES.md`](docs/SECURITY_NOTES.md) | Threat model · controls · secret handling |
 | [`docs/LIVE_VULTR_PROOF.md`](docs/LIVE_VULTR_PROOF.md) | Live inference verification record |
-| [`docs/01_PRODUCT_VISION.md`](docs/01_PRODUCT_VISION.md) → [`13_OPERATIONS.md`](docs/13_OPERATIONS.md) | Full hackathon doc pack |
 
 ---
 
@@ -274,8 +273,7 @@ TOSCO/
 │   ├── ARCHITECTURE.md
 │   ├── SECURITY_NOTES.md
 │   ├── LIVE_VULTR_PROOF.md
-│   ├── assets/              # README screenshots
-│   └── 01_…13_*.md          # Full doc pack
+│   └── assets/              # README screenshots
 ├── backend/
 │   ├── app/                 # FastAPI · engine · orchestrator
 │   ├── tests/               # 204 pytest cases

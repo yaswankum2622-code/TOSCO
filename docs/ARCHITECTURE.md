@@ -252,7 +252,5 @@ docs/
 
 ## Related Documents
 
-- [`05_API_CONTRACT.md`](05_API_CONTRACT.md) — REST/SSE contract
-- [`08_BACKEND_ENGINE_SPEC.md`](08_BACKEND_ENGINE_SPEC.md) — gate engine detail
-- [`11_ORCHESTRATION_AND_BANK_INTEGRATION.md`](11_ORCHESTRATION_AND_BANK_INTEGRATION.md) — orchestrator + mock bank
-- [`09_SECURITY_AND_THREAT_MODEL.md`](09_SECURITY_AND_THREAT_MODEL.md) — full threat catalog
+- [`SECURITY_NOTES.md`](SECURITY_NOTES.md) — threat model and security controls
+- [`LIVE_VULTR_PROOF.md`](LIVE_VULTR_PROOF.md) — live Vultr inference verification

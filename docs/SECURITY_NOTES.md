@@ -185,6 +185,5 @@ Copy-Item .env.example .env
 
 ## Related Documents
 
-- [`09_SECURITY_AND_THREAT_MODEL.md`](09_SECURITY_AND_THREAT_MODEL.md) — full threat catalog with production hardening notes
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system design and crypto contracts
 - [`LIVE_VULTR_PROOF.md`](LIVE_VULTR_PROOF.md) — live inference verification record

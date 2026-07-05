@@ -152,4 +152,3 @@ This is intentional — honest labeling, not silent degradation.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — Vultr integration architecture
 - [`SECURITY_NOTES.md`](SECURITY_NOTES.md) — secret handling and threat model
-- [`09_SECURITY_AND_THREAT_MODEL.md`](09_SECURITY_AND_THREAT_MODEL.md) — extraction sandbox isolation
