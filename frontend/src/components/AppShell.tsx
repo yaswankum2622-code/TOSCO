@@ -11,6 +11,8 @@ interface AppShellProps {
   runId: string | null;
   fallbackMode: boolean;
   decision: string | null;
+  onReset?: () => void;
+  resetting?: boolean;
   left: ReactNode;
   center: ReactNode;
   right: ReactNode;
@@ -21,6 +23,8 @@ function AppShell({
   runId,
   fallbackMode,
   decision,
+  onReset,
+  resetting = false,
   left,
   center,
   right
@@ -59,6 +63,17 @@ function AppShell({
           |
         </span>
         <div className="console-topbar__status-wrap">
+          {onReset ? (
+            <button
+              className="ghost-button console-topbar__reset"
+              type="button"
+              onClick={onReset}
+              disabled={resetting}
+              data-testid="reset-demo-button"
+            >
+              {resetting ? "Resetting…" : "Reset Demo"}
+            </button>
+          ) : null}
           <span
             className={`live-pill ${fallbackMode ? "live-pill--fallback" : "live-pill--sandbox"}`}
             data-testid="fallback-pill"

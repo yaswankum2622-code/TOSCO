@@ -229,7 +229,32 @@ pre,
 }
 
 .console-topbar__status-wrap {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 10px;
+}
+
+.console-topbar__reset {
+  min-height: 28px;
+  padding: 0 12px;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-main);
+  font-size: var(--type-11);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.console-topbar__reset:hover:enabled {
+  border-color: rgba(56, 189, 248, 0.42);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.console-topbar__reset:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .live-pill {

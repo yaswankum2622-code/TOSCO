@@ -35,7 +35,7 @@ function ScenarioSwitcher({
     <section className="panel scenario-switcher-panel" aria-labelledby="scenario-switcher-heading">
       <div className="panel__header">
         <h2 id="scenario-switcher-heading">Scenario Control</h2>
-        <button className="ghost-button" type="button" onClick={onReset} disabled={running}>
+        <button className="ghost-button" type="button" onClick={onReset}>
           Reset Demo State
         </button>
       </div>

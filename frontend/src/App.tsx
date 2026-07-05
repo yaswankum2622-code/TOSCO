@@ -78,6 +78,7 @@ function AppContent() {
   const [vultrStatus, setVultrStatus] = useState<VultrStatusResponse | null>(null);
   const [vultrLoading, setVultrLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [vultrError, setVultrError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [useVultr, setUseVultr] = useState(false);
@@ -360,7 +361,8 @@ function AppContent() {
 
   async function handleReset() {
     eventsClientRef.current?.stop();
-    setRunning(true);
+    setResetting(true);
+    setRunning(false);
     setError(null);
 
     try {
@@ -369,7 +371,7 @@ function AppContent() {
     } catch (resetError) {
       setError(formatError(resetError));
     } finally {
-      setRunning(false);
+      setResetting(false);
     }
   }
 
@@ -379,6 +381,8 @@ function AppContent() {
       runId={runState.runId}
       fallbackMode={runState.fallbackMode}
       decision={runState.decision?.value ?? null}
+      onReset={handleReset}
+      resetting={resetting}
       left={
         <>
           <ScenarioSwitcher
