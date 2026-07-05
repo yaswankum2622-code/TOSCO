@@ -98,36 +98,88 @@ TOSCO separates **extraction** from **authority**.
 
 ## Architecture
 
-```text
-Reference AP Agent
-   ↓ proposes payment
-Scenario Evidence / Vultr Extraction Adapter
-   ↓ sealed structured extraction
-TOSCO Gate Engine
-   ↓ six deterministic gates
-Decision Engine
-   ↓
-ProofPacket + SHA-256 Ledger
-   ↓
-HMAC Clearance Token
-   ↓
-Mock Bank Enforcement
-   ↓
-Clearance Terminal UI
+TOSCO enforces a strict **separation of extraction and authority**. The agent and LLM operate in an untrusted proposal zone. Deterministic Python gates, cryptographic proof, and token-bound execution form the trusted clearance core.
+
+### Clearance pipeline
+
+```mermaid
+flowchart TB
+    subgraph PROPOSE["① Proposal — untrusted"]
+        AGENT["Reference AP Agent<br/><sub>proposes payment · never executes</sub>"]
+    end
+
+    subgraph EXTRACT["② Extraction — schema-bound"]
+        EVID["Scenario Evidence<br/><sub>invoice · PO · GRN · vendor master · policy</sub>"]
+        VULTR["Vultr Serverless Inference<br/><sub>structured fields only · does not decide</sub>"]
+        SEAL["Sealed Extraction<br/><sub>Pydantic-validated · immutable to gates</sub>"]
+    end
+
+    subgraph CLEAR["③ Clearance — deterministic Python"]
+        GATES["Gate Engine<br/><sub>G1 Evidence · G2 Groundedness · G3 Policy</sub><br/><sub>G4 Risk · G5 Reality · G6 Decision Seal</sub>"]
+        DECIDE["Decision Engine<br/><sub>ALLOW · BLOCK · FREEZE</sub>"]
+        PROOF["Proof Packet<br/><sub>evidence hashes · gate results · decision</sub>"]
+        LEDGER["SHA-256 Ledger<br/><sub>tamper-evident hash chain</sub>"]
+        TOKEN["HMAC Clearance Token<br/><sub>issued on ALLOW only</sub>"]
+    end
+
+    subgraph EXEC["④ Execution boundary"]
+        BANK["Mock Bank<br/><sub>executes only with valid token</sub>"]
+    end
+
+    UI["Clearance Terminal UI<br/><sub>SSE-driven · displays backend events only</sub>"]
+
+    AGENT -->|"ActionIntent"| EVID
+    EVID --> VULTR
+    VULTR --> SEAL
+    SEAL --> GATES
+    GATES --> DECIDE
+    DECIDE --> PROOF
+    PROOF --> LEDGER
+    DECIDE -->|"ALLOW"| TOKEN
+    DECIDE -->|"BLOCK / FREEZE"| BANK
+    TOKEN --> BANK
+    BANK --> UI
+    CLEAR -.->|"live event stream"| UI
+```
+
+### Decision → execution paths
+
+```mermaid
+flowchart LR
+    D["Decision Engine"]
+
+    D -->|"ALLOW"| T["HMAC Token Issued"]
+    D -->|"BLOCK"| X["No Token"]
+    D -->|"FREEZE"| X
+
+    T --> A["Mock Bank ACCEPTED<br/><sub>vendor + amount + ledger match</sub>"]
+    X --> R["Mock Bank REJECTED<br/><sub>NO_TOKEN</sub>"]
+
+    style T fill:#14532d,stroke:#22c55e,color:#fff
+    style A fill:#14532d,stroke:#22c55e,color:#fff
+    style X fill:#450a0a,stroke:#ef4444,color:#fff
+    style R fill:#450a0a,stroke:#ef4444,color:#fff
 ```
 
 ### Gate chain
 
-| Gate | Checks |
-|------|--------|
-| **G1 Evidence** | Required documents present |
-| **G2 Groundedness** | Fields trace to source spans |
-| **G3 Policy** | Business rules and limits |
-| **G4 Risk** | Composite risk scoring |
-| **G5 Reality** | External signals vs. document claims |
-| **G6 Decision Seal** | Final deterministic fold |
+```mermaid
+flowchart LR
+    G1["G1<br/>Evidence"] --> G2["G2<br/>Groundedness"] --> G3["G3<br/>Policy"] --> G4["G4<br/>Risk"] --> G5["G5<br/>Reality"] --> G6["G6<br/>Decision Seal"]
+```
 
-Full detail → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+| Gate | What it checks | Blocks when |
+|------|----------------|-------------|
+| **G1 Evidence** | Required documents present | Missing invoice, PO, or GRN |
+| **G2 Groundedness** | Fields trace to source spans | Extracted value not in evidence |
+| **G3 Policy** | Business rules and limits | Policy violation or over-limit |
+| **G4 Risk** | Composite risk scoring | Risk threshold exceeded |
+| **G5 Reality** | External signals vs. document claims | Bank account mismatch · forged change |
+| **G6 Decision Seal** | Final deterministic fold | Seals ALLOW · BLOCK · FREEZE |
+
+> **Vultr extracts. Gates decide. Tokens authorize. Ledger proves.**
+
+Full system design → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ---
 
