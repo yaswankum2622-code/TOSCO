@@ -10,7 +10,7 @@ def make_client() -> TestClient:
 
 
 def start_run(client: TestClient, scenario: str) -> dict:
-    response = client.post("/api/runs/start", json={"scenario": scenario})
+    response = client.post("/api/runs/start?format=summary", json={"scenario": scenario})
     assert response.status_code == 200
     return response.json()
 
@@ -30,6 +30,7 @@ def test_health_route_works() -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "TOSCO"
+    assert "fallback_mode" in payload
 
 
 def test_workflows_route_works() -> None:
@@ -85,7 +86,7 @@ def test_start_forgery_run() -> None:
 def test_get_run_summary() -> None:
     with make_client() as client:
         started = start_run(client, "clean")
-        response = client.get(f"/api/runs/{started['run_id']}")
+        response = client.get(f"/api/runs/{started['run_id']}?format=summary")
 
     assert response.status_code == 200
     payload = response.json()
@@ -96,7 +97,7 @@ def test_get_run_summary() -> None:
 def test_get_run_events() -> None:
     with make_client() as client:
         started = start_run(client, "clean")
-        response = client.get(f"/api/runs/{started['run_id']}/events")
+        response = client.get(f"/api/runs/{started['run_id']}/events?format=json")
 
     assert response.status_code == 200
     payload = response.json()
@@ -130,6 +131,7 @@ def test_verify_before_tamper() -> None:
     assert payload["verified"] is True
     assert payload["ledger_chain_valid"] is True
     assert payload["packet_entry_valid"] is True
+    assert payload["chain_head"]
 
 
 def test_tamper_demo_breaks_verification() -> None:
@@ -143,16 +145,19 @@ def test_tamper_demo_breaks_verification() -> None:
     assert verified_before.json()["verified"] is True
     assert tampered.status_code == 200
     assert tampered.json()["verified"] is False
+    assert tampered.json()["tampered_field"] == "packet_hash"
+    assert tampered.json()["verify_now"] is False
     assert verified_after.status_code == 200
     assert verified_after.json()["verified"] is False
 
 
 def test_missing_run_returns_404() -> None:
     with make_client() as client:
-        response = client.get("/api/runs/not-found")
+        response = client.get("/api/runs/not-found?format=summary")
 
     assert response.status_code == 404
     assert response.json()["error"] == "RUN_NOT_FOUND"
+    assert response.json()["error_code"] == "RUN_NOT_FOUND"
 
 
 def test_invalid_scenario_returns_400() -> None:
@@ -161,6 +166,7 @@ def test_invalid_scenario_returns_400() -> None:
 
     assert response.status_code == 400
     assert response.json()["error"] == "INVALID_SCENARIO"
+    assert response.json()["error_code"] == "INVALID_SCENARIO"
 
 
 def test_reset_clears_runs() -> None:
@@ -197,8 +203,8 @@ def test_api_exposes_computed_gate_reasons() -> None:
     with make_client() as client:
         injection = start_run(client, "injection")
         forgery = start_run(client, "forgery")
-        injection_events = client.get(f"/api/runs/{injection['run_id']}/events")
-        forgery_events = client.get(f"/api/runs/{forgery['run_id']}/events")
+        injection_events = client.get(f"/api/runs/{injection['run_id']}/events?format=json")
+        forgery_events = client.get(f"/api/runs/{forgery['run_id']}/events?format=json")
 
     assert injection_events.status_code == 200
     assert forgery_events.status_code == 200

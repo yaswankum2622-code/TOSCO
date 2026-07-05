@@ -1,5 +1,4 @@
 import type { VultrStatusResponse } from "../api/types";
-import { yesNo } from "../utils/format";
 
 interface VultrStatusCardProps {
   status: VultrStatusResponse | null;
@@ -17,7 +16,9 @@ function VultrStatusCard({
   onToggleUseVultr
 }: VultrStatusCardProps) {
   const configured = status?.configured ?? false;
-  const keyPresent = status?.key_present ?? false;
+  const modeLabel = configured ? "Live extraction armed" : "Fallback rail armed";
+  const readinessLabel = configured ? "Primary route" : "Fallback route";
+  const readinessValue = configured ? "Online" : "Standby";
 
   return (
     <section
@@ -25,34 +26,37 @@ function VultrStatusCard({
       aria-labelledby="vultr-status-heading"
     >
       <div className="panel__header">
-        <h2 id="vultr-status-heading">Vultr Serverless Inference</h2>
+        <h2 id="vultr-status-heading">Live Extraction Link</h2>
         <span className={`status-pill ${configured ? "status-pill--online" : "status-pill--warning"}`}>
-          {configured ? "Configured" : "Fallback"}
+          {configured ? "Live ready" : "Fallback"}
         </span>
       </div>
 
       {error ? <p className="status-error status-error--compact">{error}</p> : null}
 
-      <div className="kv-grid">
+      <div className="vultr-status-card__stage" aria-hidden="true">
+        <span className="vultr-status-card__stage-orb" />
+        <span className="vultr-status-card__stage-ring vultr-status-card__stage-ring--a" />
+        <span className="vultr-status-card__stage-ring vultr-status-card__stage-ring--b" />
+        <span className="vultr-status-card__stage-line" />
+      </div>
+
+      <div className="kv-grid vultr-status-card__grid">
         <div>
-          <span className="kv-label">Mode</span>
-          <span className="kv-value">{status?.mode ?? (loading ? "loading" : "unavailable")}</span>
+          <span className="kv-label">State</span>
+          <span className="kv-value">{loading ? "Checking live route" : modeLabel}</span>
         </div>
         <div>
-          <span className="kv-label">Configured</span>
-          <span className="kv-value">{yesNo(configured)}</span>
+          <span className="kv-label">{readinessLabel}</span>
+          <span className="kv-value">{readinessValue}</span>
         </div>
         <div>
-          <span className="kv-label">Key present</span>
-          <span className="kv-value">{yesNo(keyPresent)}</span>
+          <span className="kv-label">Fallback rail</span>
+          <span className="kv-value">{configured ? "Ready behind live path" : "Primary path unavailable"}</span>
         </div>
         <div>
-          <span className="kv-label">Model</span>
-          <span className="kv-value">{status?.model ?? (loading ? "loading" : "-")}</span>
-        </div>
-        <div className="vultr-status-card__wide">
-          <span className="kv-label">Base URL</span>
-          <span className="kv-value">{status?.base_url ?? (loading ? "loading" : "-")}</span>
+          <span className="kv-label">Source mark</span>
+          <span className="kv-value">{configured ? "Vultr in spine extract step" : "Fallback label in spine extract step"}</span>
         </div>
       </div>
 
@@ -68,8 +72,8 @@ function VultrStatusCard({
 
       <p className="panel__subcopy">
         {configured
-          ? "Vultr extraction ready. Final clearance still belongs to deterministic TOSCO gates."
-          : "Fallback mode active. TOSCO will use seeded extraction while preserving deterministic gates."}
+          ? "Live extraction is ready. Final clearance still belongs to deterministic TOSCO gates."
+          : "Fallback mode stays safe. TOSCO can still complete the full run without breaking the clearance path."}
       </p>
     </section>
   );

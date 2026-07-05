@@ -21,15 +21,19 @@ function EvidenceRail({ timeline }: EvidenceRailProps) {
         <span className="badge">Evidence hashed, not stored raw</span>
       </div>
       {!timeline ? (
-        <p className="empty-state">Evidence retrieval and extraction events appear after a run starts.</p>
+        <p className="empty-state">Evidence load and extraction events appear after a run starts.</p>
       ) : (
         <div className="rail-stack">
           <div className="rail-card">
             <span className="kv-label">Evidence count</span>
-            <strong className="rail-card__value">{evidenceCount ?? "—"}</strong>
+            <strong className="rail-card__value">{evidenceCount ?? "-"}</strong>
             <div className="chip-row">
               {evidenceTypes.length > 0 ? (
-                evidenceTypes.map((type) => <span key={type} className="chip">{type}</span>)
+                evidenceTypes.map((type) => (
+                  <span key={type} className="chip">
+                    {type}
+                  </span>
+                ))
               ) : (
                 <span className="empty-state">No evidence types recorded.</span>
               )}

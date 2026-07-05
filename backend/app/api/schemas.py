@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from app.custom.builder import CustomRunInput
 from app.engine.proof import ProofPacket
+from app.models import ActionIntent, GateResult, ProposedAction, ToolCall, WorkflowDefinition
 from app.orchestrator.events import OrchestratorEvent
 from app.orchestrator.runner import OrchestratedRun
 
@@ -32,6 +34,73 @@ class StartRunRequest(BaseModel):
         """Reject blank scenario names."""
 
         return _require_non_empty(value, "scenario")
+
+
+class CustomRunRequest(CustomRunInput):
+    """Request body for starting one judge-supplied custom clearance run."""
+
+    pass
+
+
+class RunHandleResponse(BaseModel):
+    """Minimal contract response for creating a run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+
+    @field_validator("run_id")
+    @classmethod
+    def validate_run_id(cls, value: str) -> str:
+        """Reject blank run identifiers."""
+
+        return _require_non_empty(value, "run_id")
+
+
+class AgentProposeRequest(BaseModel):
+    """Contract request body for the public proposal endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    workflow: str
+    action: ProposedAction
+    evidence_refs: list[str] = Field(default_factory=list)
+    declared_confidence: float
+    requested_mode: str
+    scenario: str
+
+    @field_validator("agent_id", "workflow", "requested_mode", "scenario")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
+        """Reject blank proposal fields."""
+
+        return _require_non_empty(value, info.field_name)
+
+    @field_validator("declared_confidence")
+    @classmethod
+    def validate_declared_confidence(cls, value: float) -> float:
+        """Keep confidence values within the documented 0..1 range."""
+
+        if not 0 <= value <= 1:
+            raise ValueError("declared_confidence must be between 0 and 1")
+        return value
+
+
+class AgentProposeResponse(BaseModel):
+    """Contract response for a proposal that was accepted for consideration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent_id: str
+    accepted: bool
+
+    @field_validator("intent_id")
+    @classmethod
+    def validate_intent_id(cls, value: str) -> str:
+        """Reject blank intent identifiers."""
+
+        return _require_non_empty(value, "intent_id")
 
 
 class RunSummaryResponse(BaseModel):
@@ -82,6 +151,45 @@ class EventTimelineResponse(BaseModel):
         return _require_non_empty(value, "run_id")
 
 
+class RunSnapshotResponse(BaseModel):
+    """Full run snapshot used by the documented poll-fallback endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    workflow_id: str | None = None
+    status: str
+    intent: ActionIntent | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    extraction_hash: str | None = None
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    gate_results: list[GateResult] = Field(default_factory=list)
+    decision: str | None = None
+    fallback_mode: bool = False
+    clearance_token: str | None = None
+    error_message: str | None = None
+
+    @field_validator("run_id", "status")
+    @classmethod
+    def validate_required_strings(cls, value: str, info: ValidationInfo) -> str:
+        """Reject blank snapshot identifiers."""
+
+        return _require_non_empty(value, info.field_name)
+
+    @field_validator("workflow_id", "decision", "clearance_token", "error_message")
+    @classmethod
+    def validate_optional_strings(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
+        """Trim optional strings while preserving nullability."""
+
+        if value is None:
+            return None
+        return _require_non_empty(value, info.field_name)
+
+
 class ProofPacketResponse(BaseModel):
     """Expose the sealed proof packet plus proof linkage hashes."""
 
@@ -111,6 +219,9 @@ class VerifyRunResponse(BaseModel):
     proof_hash: str
     ledger_entry_hash: str
     verified: bool
+    chain_head: str | None = None
+    tampered_field: str | None = None
+    verify_now: bool | None = None
 
     @field_validator("run_id", "proof_hash", "ledger_entry_hash")
     @classmethod
@@ -119,16 +230,31 @@ class VerifyRunResponse(BaseModel):
 
         return _require_non_empty(value, info.field_name)
 
+    @field_validator("chain_head", "tampered_field")
+    @classmethod
+    def validate_optional_strings(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
+        """Trim optional verification metadata while preserving nullability."""
+
+        if value is None:
+            return None
+        return _require_non_empty(value, info.field_name)
+
 
 class ErrorResponse(BaseModel):
     """Stable error body for predictable frontend handling."""
 
     model_config = ConfigDict(extra="forbid")
 
+    error_code: str
+    message: str
     error: str
     detail: str
 
-    @field_validator("error", "detail")
+    @field_validator("error_code", "message", "error", "detail")
     @classmethod
     def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
         """Reject blank error fields."""
@@ -155,6 +281,59 @@ class VultrStatusResponse(BaseModel):
         return _require_non_empty(value, info.field_name)
 
 
+class ExecutionAttemptRequest(BaseModel):
+    """Contract request body for the public execution-boundary endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    token: str | None = None
+    vendor_id: str
+    amount: float
+
+    @field_validator("run_id", "vendor_id")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
+        """Reject blank execution request identifiers."""
+
+        return _require_non_empty(value, info.field_name)
+
+    @field_validator("token")
+    @classmethod
+    def validate_optional_token(cls, value: str | None) -> str | None:
+        """Collapse blank token strings into None."""
+
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(cls, value: float) -> float:
+        """Reject non-positive execution amounts."""
+
+        if value <= 0:
+            raise ValueError("amount must be > 0")
+        return value
+
+
+class ExecutionAttemptResponse(BaseModel):
+    """Contract response for the public execution-boundary endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    executed: bool
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        """Reject blank execution reasons."""
+
+        return _require_non_empty(value, "reason")
+
+
 def run_to_summary(orchestrated_run: OrchestratedRun) -> RunSummaryResponse:
     """Convert a stored orchestrated run into the API summary shape."""
 
@@ -170,3 +349,9 @@ def run_to_summary(orchestrated_run: OrchestratedRun) -> RunSummaryResponse:
         ledger_entry_hash=orchestrated_run.ledger_entry.entry_hash,
         timeline_events_count=orchestrated_run.timeline.length,
     )
+
+
+def workflow_to_contract_payload(workflow: WorkflowDefinition) -> dict[str, object]:
+    """Serialize a workflow definition using the public contract field names."""
+
+    return workflow.model_dump(mode="json")

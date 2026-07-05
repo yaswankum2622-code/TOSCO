@@ -14,7 +14,7 @@ describe("apiClient", () => {
 
   it("getHealth calls /api/health", async () => {
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ status: "ok", service: "TOSCO", version: "0.1.0", mode: "demo" }), {
+      new Response(JSON.stringify({ status: "ok", service: "TOSCO", version: "0.1.0", mode: "demo", fallback_mode: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
       })
@@ -23,7 +23,7 @@ describe("apiClient", () => {
     await apiClient.getHealth();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/health",
+      "/api/health",
       expect.objectContaining({
         headers: { "Content-Type": "application/json" }
       })
@@ -34,16 +34,7 @@ describe("apiClient", () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
-          scenario: "clean",
-          run_id: "run-clean-001",
-          final_decision: "ALLOW",
-          allow_execution: true,
-          token_issued: true,
-          mock_bank_status: "ACCEPTED",
-          mock_bank_reason_code: "EXECUTION_ACCEPTED",
-          proof_hash: "a".repeat(64),
-          ledger_entry_hash: "b".repeat(64),
-          timeline_events_count: 12
+          run_id: "run-clean-001"
         }),
         {
           status: 200,
@@ -55,7 +46,7 @@ describe("apiClient", () => {
     await apiClient.startRun("clean");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/runs/start",
+      "/api/runs/start",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ scenario: "clean", use_vultr: false })
@@ -83,7 +74,7 @@ describe("apiClient", () => {
     await apiClient.getVultrStatus();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/integrations/vultr/status",
+      "/api/integrations/vultr/status",
       expect.objectContaining({
         headers: { "Content-Type": "application/json" }
       })
@@ -92,7 +83,7 @@ describe("apiClient", () => {
 
   it("non-2xx responses throw ApiError", async () => {
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ error: "INVALID_SCENARIO", detail: "Bad scenario" }), {
+      new Response(JSON.stringify({ error_code: "INVALID_SCENARIO", message: "Bad scenario" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
         statusText: "Bad Request"
@@ -123,9 +114,44 @@ describe("apiClient", () => {
     await apiClient.verifyRun("run-clean-001");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/runs/run-clean-001/verify",
+      "/api/runs/run-clean-001/verify",
       expect.objectContaining({
         headers: { "Content-Type": "application/json" }
+      })
+    );
+  });
+
+  it("attemptExecution posts to the execution endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          executed: false,
+          reason: "NO_TOKEN"
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    await apiClient.attemptExecution({
+      run_id: "run-clean-001",
+      token: null,
+      vendor_id: "VEND-ACME-001",
+      amount: 340000
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/execution/attempt",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          run_id: "run-clean-001",
+          token: null,
+          vendor_id: "VEND-ACME-001",
+          amount: 340000
+        })
       })
     );
   });

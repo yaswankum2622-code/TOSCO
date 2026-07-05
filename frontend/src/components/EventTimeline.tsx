@@ -9,11 +9,14 @@ function EventTimeline({ timeline }: EventTimelineProps) {
   return (
     <section className="panel timeline-panel" aria-labelledby="timeline-heading">
       <div className="panel__header">
-        <h2 id="timeline-heading">Event Timeline</h2>
-        <span className="mono-label">{timeline ? `${timeline.events.length} events` : "No run loaded"}</span>
+        <h2 id="timeline-heading">Run Pulse</h2>
+        <span className="mono-label">{timeline ? `${timeline.events.length} steps` : "Standby"}</span>
       </div>
       {!timeline ? (
-        <p className="empty-state">Timeline events will appear here after a scenario run starts.</p>
+        <div className="timeline-empty-state">
+          <span className="timeline-empty-state__orb" aria-hidden="true" />
+          <p className="empty-state">A live pulse appears here once a scenario starts.</p>
+        </div>
       ) : (
         <div className="timeline-list">
           {timeline.events.map((event) => (

@@ -16,6 +16,12 @@ const BUTTON_LABELS: Record<string, string> = {
   forgery: "Run Forged Bank Change"
 };
 
+const VISUAL_STRAPS: Record<string, string> = {
+  clean: "Matched records",
+  injection: "Hijack attempt",
+  forgery: "Ownership conflict"
+};
+
 function ScenarioSwitcher({
   scenarios,
   activeScenario,
@@ -26,7 +32,7 @@ function ScenarioSwitcher({
   const shouldReduceMotion = useReducedMotion();
 
   return (
-    <section className="panel" aria-labelledby="scenario-switcher-heading">
+    <section className="panel scenario-switcher-panel" aria-labelledby="scenario-switcher-heading">
       <div className="panel__header">
         <h2 id="scenario-switcher-heading">Scenario Control</h2>
         <button className="ghost-button" type="button" onClick={onReset} disabled={running}>
@@ -39,14 +45,20 @@ function ScenarioSwitcher({
           return (
             <motion.article
               key={scenario.scenario}
-              className={`scenario-card ${isActive ? "scenario-card--active" : ""}`}
+              className={`scenario-card scenario-card--${scenario.scenario} ${isActive ? "scenario-card--active" : ""}`}
               whileHover={shouldReduceMotion ? undefined : { y: -4 }}
               transition={{ duration: 0.16 }}
             >
+              <div className="scenario-card__visual" aria-hidden="true">
+                <span className="scenario-card__visual-orb" />
+                <span className="scenario-card__visual-ring scenario-card__visual-ring--a" />
+                <span className="scenario-card__visual-ring scenario-card__visual-ring--b" />
+                <span className="scenario-card__visual-strap">{VISUAL_STRAPS[scenario.scenario] ?? "Live route"}</span>
+              </div>
               <div className="scenario-card__meta">
                 <span className="scenario-card__eyebrow">{scenario.scenario}</span>
                 <span className="scenario-card__expectation">
-                  Demo expectation: {scenario.expected_tosco_decision}
+                  Expected clearance: {scenario.expected_tosco_decision}
                 </span>
               </div>
               <h3>{scenario.title}</h3>

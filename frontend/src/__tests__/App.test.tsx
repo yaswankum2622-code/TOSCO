@@ -4,6 +4,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App";
 import { apiClient } from "../api/client";
+import { createRunEventsClient } from "../api/events";
+import { makeContractSequence } from "../test/runFixtures";
+
+const mockRunEventsClient = {
+  start: vi.fn(),
+  stop: vi.fn()
+};
+
+vi.mock("../api/events", () => ({
+  createRunEventsClient: vi.fn(() => mockRunEventsClient)
+}));
 
 vi.mock("../api/client", () => ({
   ApiError: class ApiError extends Error {
@@ -19,11 +30,11 @@ vi.mock("../api/client", () => ({
     getVultrStatus: vi.fn(),
     getWorkflows: vi.fn(),
     getScenarios: vi.fn(),
+    proposeIntent: vi.fn(),
     startRun: vi.fn(),
     listRuns: vi.fn(),
     getRun: vi.fn(),
-    getEvents: vi.fn(),
-    getProof: vi.fn(),
+    attemptExecution: vi.fn(),
     verifyRun: vi.fn(),
     tamperRun: vi.fn(),
     resetDemo: vi.fn()
@@ -31,6 +42,7 @@ vi.mock("../api/client", () => ({
 }));
 
 const mockedApiClient = vi.mocked(apiClient);
+const mockedCreateRunEventsClient = vi.mocked(createRunEventsClient);
 
 const scenarios = [
   {
@@ -60,39 +72,46 @@ const workflows = [
   {
     workflow_id: "vendor_payment",
     workflow_name: "Vendor Payment",
-    required_evidence_types: ["invoice", "po", "grn", "vendor_master"],
-    gates_to_run: ["G1_EVIDENCE", "G2_GROUNDEDNESS"],
+    required_evidence_types: ["invoice", "po", "grn", "vendor_master", "policy_pack"],
+    gates_to_run: ["G1_EVIDENCE", "G2_GROUNDEDNESS", "G3_POLICY", "G4_RISK", "G5_REALITY"],
     tools_to_call: ["policy_tool", "risk_tool"],
     execution_adapter: "sandbox"
   }
 ];
 
-function makeRunSummary(finalDecision: string) {
-  return {
-    scenario:
-      finalDecision === "BLOCK"
-        ? "injection"
-        : finalDecision === "FREEZE"
-          ? "forgery"
-          : "clean",
-    run_id: `${finalDecision.toLowerCase()}-run-001`,
-    final_decision: finalDecision,
-    allow_execution: finalDecision === "ALLOW",
-    token_issued: finalDecision === "ALLOW",
-    mock_bank_status: finalDecision === "ALLOW" ? "ACCEPTED" : "REJECTED",
-    mock_bank_reason_code: finalDecision === "ALLOW" ? "EXECUTION_ACCEPTED" : "MISSING_CLEARANCE_TOKEN",
-    proof_hash: "a".repeat(64),
-    ledger_entry_hash: "b".repeat(64),
-    timeline_events_count: 9
-  };
+const verifiedResponse = {
+  run_id: "run-clean-001",
+  ledger_chain_valid: true,
+  packet_entry_valid: true,
+  proof_hash: "a".repeat(64),
+  ledger_entry_hash: "b".repeat(64),
+  chain_head: "b".repeat(64),
+  verified: true
+};
+
+const tamperedResponse = {
+  run_id: "run-clean-001",
+  ledger_chain_valid: false,
+  packet_entry_valid: false,
+  proof_hash: "a".repeat(64),
+  ledger_entry_hash: "b".repeat(64),
+  chain_head: "b".repeat(64),
+  verified: false,
+  tampered_field: "packet_hash",
+  verify_now: false
+};
+
+function runIdForScenario(scenario: string): string {
+  return `run-${scenario}-001`;
 }
 
-function mockBootstrap() {
+function bootstrap() {
   mockedApiClient.getHealth.mockResolvedValue({
     status: "ok",
     service: "TOSCO",
     version: "0.1.0",
-    mode: "demo"
+    mode: "demo",
+    fallback_mode: true
   });
   mockedApiClient.getVultrStatus.mockResolvedValue({
     configured: false,
@@ -103,98 +122,53 @@ function mockBootstrap() {
   });
   mockedApiClient.getWorkflows.mockResolvedValue(workflows);
   mockedApiClient.getScenarios.mockResolvedValue(scenarios);
+  mockedApiClient.proposeIntent.mockResolvedValue({
+    intent_id: "intent-clean-001",
+    accepted: true
+  });
+  mockedApiClient.startRun.mockImplementation(async (scenario: string) => ({
+    run_id: runIdForScenario(scenario)
+  }));
+  mockedApiClient.verifyRun.mockResolvedValue(verifiedResponse);
+  mockedApiClient.tamperRun.mockResolvedValue(tamperedResponse);
+  mockedApiClient.resetDemo.mockResolvedValue({
+    status: "reset",
+    runs: 0
+  });
 }
 
-function makeTimeline() {
-  return {
-    run_id: "run-001",
-    events: [
-      {
-        index: 0,
-        event_type: "AGENT_PROPOSED",
-        run_id: "run-001",
-        title: "Agent Proposed",
-        detail: "The agent proposed a payment.",
-        payload: {
-          scenario: "clean",
-          naive_action: "Approve vendor payment",
-          vendor_id: "V-1042",
-          amount: 340000,
-          bank_account_last4: "8821"
-        }
-      },
-      {
-        index: 1,
-        event_type: "DECISION_MADE",
-        run_id: "run-001",
-        title: "Decision Made",
-        detail: "The deterministic engine decided.",
-        payload: {
-          status: "ALLOW",
-          allow_execution: true,
-          reason_codes: ["ALL_GATES_PASS"]
-        }
-      },
-      {
-        index: 2,
-        event_type: "PROOF_SEALED",
-        run_id: "run-001",
-        title: "Proof Packet Sealed",
-        detail: "The proof packet was sealed.",
-        payload: {
-          proof_hash: "a".repeat(64)
-        }
-      },
-      {
-        index: 3,
-        event_type: "EXECUTION_ACCEPTED",
-        run_id: "run-001",
-        title: "Execution Accepted",
-        detail: "The Mock Bank accepted the payment.",
-        payload: {
-          reason_code: "EXECUTION_ACCEPTED",
-          execution_reference: "MOCKBANK-001"
-        }
+function emitSequence(decision: "ALLOW" | "BLOCK" | "FREEZE") {
+  mockRunEventsClient.start.mockImplementation((_runId, handlers) => {
+    void (async () => {
+      for (const event of makeContractSequence(decision)) {
+        await handlers.onEvent(event);
       }
-    ]
-  };
-}
-
-function makeProof() {
-  return {
-    run_id: "run-001",
-    proof_packet: {
-      packet_version: "1.0"
-    },
-    proof_hash: "a".repeat(64),
-    ledger_entry_hash: "b".repeat(64)
-  };
+      handlers.onComplete?.();
+    })();
+  });
 }
 
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockBootstrap();
-    mockedApiClient.getEvents.mockResolvedValue(makeTimeline());
-    mockedApiClient.getProof.mockResolvedValue(makeProof());
-    mockedApiClient.verifyRun.mockResolvedValue({
-      run_id: "run-001",
-      ledger_chain_valid: true,
-      packet_entry_valid: true,
-      proof_hash: "a".repeat(64),
-      ledger_entry_hash: "b".repeat(64),
-      verified: true
-    });
-    mockedApiClient.resetDemo.mockResolvedValue({
-      status: "reset",
-      runs: 0
-    });
+    mockedCreateRunEventsClient.mockReturnValue(mockRunEventsClient);
+    bootstrap();
   });
 
-  it("renders the TOSCO header", async () => {
+  it("renders the clearance console shell with a sandbox pill by default", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "TOSCO" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Run Clean Payment" });
+
+    expect(screen.getByTestId("console-topbar")).toBeInTheDocument();
+    expect(screen.getByTestId("console-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("left-column")).toBeInTheDocument();
+    expect(screen.getByTestId("center-console")).toBeInTheDocument();
+    expect(screen.getByTestId("right-stack")).toBeInTheDocument();
+    expect(screen.getByTestId("fallback-pill")).toHaveTextContent("LIVE SANDBOX");
+    expect(screen.getByTestId("settlement-hero")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByText("Agents propose. TOSCO clears. Execution obeys. Audit proves.")).toBeInTheDocument();
+    expect(screen.getByText("Vendor Payment")).toBeInTheDocument();
   });
 
   it("renders scenario buttons after mocked load", async () => {
@@ -205,8 +179,8 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Run Forged Bank Change" })).toBeInTheDocument();
   });
 
-  it("clicking clean scenario displays backend-computed ALLOW result", async () => {
-    mockedApiClient.startRun.mockResolvedValue(makeRunSummary("ALLOW"));
+  it("clicking clean scenario displays backend event ALLOW result", async () => {
+    emitSequence("ALLOW");
 
     render(<App />);
 
@@ -215,8 +189,20 @@ describe("App", () => {
     expect(await screen.findByTestId("final-decision")).toHaveTextContent("ALLOW");
   });
 
-  it("clicking injection scenario displays backend-computed BLOCK result", async () => {
-    mockedApiClient.startRun.mockResolvedValue(makeRunSummary("BLOCK"));
+  it("collapses the hero once a run starts", async () => {
+    emitSequence("ALLOW");
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Run Clean Payment" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settlement-hero")).toHaveAttribute("data-collapsed", "true");
+    });
+  });
+
+  it("clicking injection scenario displays backend event BLOCK result", async () => {
+    emitSequence("BLOCK");
 
     render(<App />);
 
@@ -225,8 +211,8 @@ describe("App", () => {
     expect(await screen.findByTestId("final-decision")).toHaveTextContent("BLOCK");
   });
 
-  it("clicking forgery scenario displays backend-computed FREEZE result", async () => {
-    mockedApiClient.startRun.mockResolvedValue(makeRunSummary("FREEZE"));
+  it("clicking forgery scenario displays backend event FREEZE result", async () => {
+    emitSequence("FREEZE");
 
     render(<App />);
 
@@ -235,24 +221,41 @@ describe("App", () => {
     expect(await screen.findByTestId("final-decision")).toHaveTextContent("FREEZE");
   });
 
-  it("tamper button displays verified false after mocked tamper response", async () => {
-    mockedApiClient.startRun.mockResolvedValue(makeRunSummary("ALLOW"));
-    mockedApiClient.tamperRun.mockResolvedValue({
-      run_id: "allow-run-001",
-      ledger_chain_valid: false,
-      packet_entry_valid: false,
-      proof_hash: "a".repeat(64),
-      ledger_entry_hash: "b".repeat(64),
-      verified: false
-    });
+  it("keeps hash verifier controls hidden before proof is sealed", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Run Clean Payment" });
+
+    expect(screen.queryByTestId("hash-verifier")).not.toBeInTheDocument();
+  });
+
+  it("verify chain displays a verified result after a sealed run", async () => {
+    emitSequence("ALLOW");
 
     render(<App />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Run Clean Payment" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Tamper Ledger" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Verify chain" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("verified-value")).toHaveTextContent("false");
+      expect(screen.getByTestId("hash-verifier-result")).toHaveTextContent("VERIFIED");
     });
+    expect(screen.getByTestId("hash-verifier-status")).toHaveTextContent("VERIFIED");
+  });
+
+  it("tamper auto re-verifies and keeps the tampered field note", async () => {
+    emitSequence("ALLOW");
+    mockedApiClient.verifyRun.mockResolvedValueOnce(verifiedResponse).mockResolvedValueOnce(tamperedResponse);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Run Clean Payment" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Verify chain" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Tamper a row" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("hash-verifier-result")).toHaveTextContent("FAILED");
+    });
+    expect(screen.getByTestId("hash-verifier-tampered-field")).toHaveTextContent("packet_hash");
   });
 });

@@ -1,16 +1,16 @@
-import type { RunSummaryResponse, WorkflowMetadata } from "../api/types";
+import type { WorkflowMetadata } from "../api/types";
 
 interface WorkflowStripProps {
   workflows: WorkflowMetadata[];
-  activeRun: RunSummaryResponse | null;
+  activeScenario: string | null;
 }
 
-function WorkflowStrip({ workflows, activeRun }: WorkflowStripProps) {
+function WorkflowStrip({ workflows, activeScenario }: WorkflowStripProps) {
   return (
     <section className="panel" aria-labelledby="workflow-strip-heading">
       <div className="panel__header">
         <h2 id="workflow-strip-heading">Workflow Strip</h2>
-        <span className="mono-label">{activeRun ? `Live run: ${activeRun.scenario}` : "Ready"}</span>
+        <span className="mono-label">{activeScenario ? `Live run: ${activeScenario}` : "Ready"}</span>
       </div>
       {workflows.length === 0 ? (
         <p className="empty-state">Workflow metadata will appear when the backend registry is available.</p>

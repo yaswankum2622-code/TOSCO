@@ -1,14 +1,25 @@
-"""In-memory API state for orchestrated TOSCO demo runs."""
+"""In-memory API state and SSE orchestration support for TOSCO demo runs."""
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-
+from app.api.sse_bus import ContractEventMessage, RunSseBus
 from app.engine.ledger import HashLedger, LedgerEntry, LedgerError
-from app.orchestrator.runner import OrchestratedRun, OrchestratorConfig, OrchestratorError, run_scenario
-from app.scenarios.loader import SCENARIOS, ScenarioLoadError, load_scenario_seed
+from app.custom.builder import CustomRunInput, build_custom_proposal, build_custom_seed
+from app.orchestrator.runner import (
+    OrchestratedRun,
+    OrchestratorConfig,
+    OrchestratorError,
+    run_from_seed,
+)
+from app.scenarios.loader import SCENARIOS, ScenarioLoadError, ScenarioSeed, load_scenario_seed
+from app.agent.reference_ap_agent import ReferenceAPAgent, AgentProposal
+from app.models import ActionIntent
 
 
 def _require_non_empty(value: str, field_name: str) -> str:
@@ -23,54 +34,87 @@ def _require_non_empty(value: str, field_name: str) -> str:
 class ApiStateError(RuntimeError):
     """Signal user-facing API state failures with safe status metadata."""
 
-    def __init__(self, detail: str, *, error: str, status_code: int) -> None:
-        super().__init__(detail)
-        self.detail = detail
-        self.error = error
+    def __init__(self, message: str, *, error_code: str, status_code: int) -> None:
+        super().__init__(message)
+        self.message = message
+        self.detail = message
+        self.error_code = error_code
+        self.error = error_code
         self.status_code = status_code
 
 
-class ApiRunRecord(BaseModel):
-    """Persist one orchestrated run plus its demo tamper state."""
-
-    model_config = ConfigDict(extra="forbid")
+@dataclass(slots=True)
+class ApiRunRecord:
+    """Hold all mutable runtime state for one orchestrated run."""
 
     run_id: str
     scenario: str
-    orchestrated_run: OrchestratedRun
-    tampered: bool = False
-    tamper_reason: str | None = None
+    workflow_id: str
+    intent: ActionIntent
+    evidence_refs: list[str]
+    bus: RunSseBus
+    loop: asyncio.AbstractEventLoop
+    status: str = "PENDING"
+    orchestrated_run: OrchestratedRun | None = None
+    extraction_hash: str | None = None
+    fallback_mode: bool = False
+    decision: str | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    gate_results: list[dict[str, Any]] = field(default_factory=list)
+    clearance_token: str | None = None
+    error_message: str | None = None
+    completed_event: asyncio.Event = field(default_factory=asyncio.Event)
 
-    @field_validator("run_id", "scenario")
-    @classmethod
-    def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
-        """Reject blank run metadata."""
+    def to_snapshot(self) -> dict[str, Any]:
+        """Return the contract snapshot payload for this run."""
 
-        return _require_non_empty(value, info.field_name)
+        return {
+            "run_id": self.run_id,
+            "workflow_id": self.workflow_id,
+            "status": self.status,
+            "intent": None if self.intent is None else self.intent.model_dump(mode="json"),
+            "evidence_refs": list(self.evidence_refs),
+            "extraction_hash": self.extraction_hash,
+            "tool_calls": list(self.tool_calls),
+            "gate_results": list(self.gate_results),
+            "decision": self.decision,
+            "fallback_mode": self.fallback_mode,
+            "clearance_token": self.clearance_token,
+            "error_message": self.error_message,
+        }
 
 
 class InMemoryApiState:
-    """Keep one shared ledger and insertion-ordered demo runs in memory."""
+    """Keep one shared ledger, proposal state, and per-run SSE buses in memory."""
 
     def __init__(self) -> None:
         self.ledger = HashLedger()
         self.runs: dict[str, ApiRunRecord] = {}
+        self.proposals: dict[str, ActionIntent] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._lock = threading.Lock()
+        self._ledger_lock = threading.Lock()
 
-    def start_run(
+    def register_proposal(self, intent: ActionIntent) -> None:
+        """Persist a proposal intent so the public control plane can inspect it later."""
+
+        self.proposals[intent.intent_id] = intent
+
+    async def start_run(
         self,
         scenario: str,
         config: OrchestratorConfig | None = None,
         *,
         use_vultr: bool = False,
     ) -> ApiRunRecord:
-        """Start one orchestrated run and store it by deterministic run_id."""
+        """Start one orchestrated run in the background and return its handle immediately."""
 
         normalized_scenario = _require_non_empty(scenario, "scenario").lower()
         if normalized_scenario not in SCENARIOS:
             allowed = ", ".join(sorted(SCENARIOS))
             raise ApiStateError(
                 f"Invalid scenario '{scenario}'. Allowed scenarios: {allowed}",
-                error="INVALID_SCENARIO",
+                error_code="INVALID_SCENARIO",
                 status_code=400,
             )
 
@@ -79,43 +123,140 @@ class InMemoryApiState:
         except ScenarioLoadError as exc:
             raise ApiStateError(
                 "Scenario metadata could not be loaded.",
-                error="SCENARIO_LOAD_FAILED",
+                error_code="SCENARIO_LOAD_FAILED",
                 status_code=500,
             ) from exc
 
-        if seed.run_id in self.runs:
-            raise ApiStateError(
-                f"Run '{seed.run_id}' already exists. Reset demo state before rerunning this scenario.",
-                error="RUN_ALREADY_EXISTS",
-                status_code=400,
+        with self._lock:
+            if seed.run_id in self.runs:
+                raise ApiStateError(
+                    f"Run '{seed.run_id}' already exists. Reset demo state before rerunning this scenario.",
+                    error_code="RUN_ALREADY_EXISTS",
+                    status_code=400,
+                )
+
+            proposal = ReferenceAPAgent().propose_from_seed(seed)
+            self.proposals[proposal.intent.intent_id] = proposal.intent
+            loop = asyncio.get_running_loop()
+            record = ApiRunRecord(
+                run_id=seed.run_id,
+                scenario=normalized_scenario,
+                workflow_id=seed.workflow_id,
+                intent=proposal.intent,
+                evidence_refs=list(proposal.intent.evidence_refs),
+                bus=RunSseBus(seed.run_id, loop),
+                loop=loop,
             )
+            self.runs[record.run_id] = record
 
         active_config = (
             OrchestratorConfig(use_vultr=use_vultr)
             if config is None
             else config.model_copy(update={"use_vultr": use_vultr})
         )
+        task = asyncio.create_task(self._execute_run(record.run_id, seed, active_config))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return record
+
+    async def start_custom_run(
+        self,
+        payload: CustomRunInput,
+        config: OrchestratorConfig | None = None,
+    ) -> ApiRunRecord:
+        """Start one judge-supplied custom run through the full clearance pipeline."""
+
+        seed = build_custom_seed(payload)
+        proposal = build_custom_proposal(seed)
+
+        with self._lock:
+            loop = asyncio.get_running_loop()
+            record = ApiRunRecord(
+                run_id=seed.run_id,
+                scenario="custom",
+                workflow_id=seed.workflow_id,
+                intent=proposal.intent,
+                evidence_refs=list(proposal.intent.evidence_refs),
+                bus=RunSseBus(seed.run_id, loop),
+                loop=loop,
+            )
+            self.runs[record.run_id] = record
+            self.proposals[proposal.intent.intent_id] = proposal.intent
+
+        active_config = (
+            OrchestratorConfig(use_vultr=payload.use_vultr)
+            if config is None
+            else config.model_copy(update={"use_vultr": payload.use_vultr})
+        )
+        task = asyncio.create_task(
+            self._execute_run(record.run_id, seed, active_config, proposal=proposal)
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return record
+
+    async def _execute_run(
+        self,
+        run_id: str,
+        seed: ScenarioSeed,
+        config: OrchestratorConfig,
+        *,
+        proposal: AgentProposal | None = None,
+    ) -> None:
+        """Run the existing orchestrator in a worker thread and persist its final state."""
+
+        record = self.get_run(run_id)
+
+        def contract_emit(event_name: str, data: dict[str, Any] | None) -> None:
+            record.bus.publish(event_name, data)
 
         try:
-            orchestrated_run = run_scenario(
-                normalized_scenario,
-                config=active_config,
-                ledger=self.ledger,
-            )
+            with self._ledger_lock:
+                orchestrated_run = await asyncio.to_thread(
+                    run_from_seed,
+                    seed,
+                    config=config,
+                    ledger=self.ledger,
+                    contract_event_emitter=contract_emit,
+                    proposal=proposal,
+                )
         except OrchestratorError as exc:
-            raise ApiStateError(
-                "The backend could not start the requested run.",
-                error="RUN_START_FAILED",
-                status_code=500,
-            ) from exc
+            record.status = "FAILED"
+            record.error_message = str(exc)
+            record.bus.complete()
+            record.loop.call_soon_threadsafe(record.completed_event.set)
+            return
+        except Exception as exc:  # pragma: no cover - defensive runtime guard
+            record.status = "FAILED"
+            record.error_message = "The backend run failed unexpectedly."
+            record.bus.complete()
+            record.loop.call_soon_threadsafe(record.completed_event.set)
+            raise exc
 
-        record = ApiRunRecord(
-            run_id=orchestrated_run.run_context.run_id,
-            scenario=orchestrated_run.scenario,
-            orchestrated_run=orchestrated_run,
+        record.orchestrated_run = orchestrated_run
+        record.status = "COMPLETED"
+        record.extraction_hash = (
+            orchestrated_run.run_context.extraction.sealed_hash()
+            if orchestrated_run.run_context.extraction is not None
+            else None
         )
-        self.runs[record.run_id] = record
-        return record
+        record.fallback_mode = orchestrated_run.run_context.fallback_mode
+        record.decision = orchestrated_run.final_decision.value
+        record.tool_calls = [
+            tool_call.model_dump(mode="json")
+            for tool_call in orchestrated_run.run_context.tool_calls
+        ]
+        record.gate_results = [
+            gate_result.model_dump(mode="json")
+            for gate_result in orchestrated_run.outcome.gate_results
+        ]
+        record.clearance_token = (
+            orchestrated_run.clearance_token.model_dump_json()
+            if orchestrated_run.clearance_token is not None
+            else None
+        )
+        record.bus.complete()
+        record.loop.call_soon_threadsafe(record.completed_event.set)
 
     def get_run(self, run_id: str) -> ApiRunRecord:
         """Return one stored run by ID."""
@@ -126,25 +267,79 @@ class InMemoryApiState:
         except KeyError as exc:
             raise ApiStateError(
                 f"Run '{normalized_run_id}' was not found.",
-                error="RUN_NOT_FOUND",
+                error_code="RUN_NOT_FOUND",
                 status_code=404,
             ) from exc
+
+    async def wait_for_completion(
+        self,
+        run_id: str,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> ApiRunRecord:
+        """Wait briefly for one run to complete so legacy routes remain usable."""
+
+        record = self.get_run(run_id)
+        if record.status in {"COMPLETED", "FAILED"}:
+            return record
+
+        try:
+            await asyncio.wait_for(record.completed_event.wait(), timeout=timeout_seconds)
+        except TimeoutError as exc:
+            raise ApiStateError(
+                f"Run '{run_id}' is still processing.",
+                error_code="RUN_NOT_READY",
+                status_code=409,
+            ) from exc
+
+        return record
+
+    async def subscribe_contract_events(
+        self,
+        run_id: str,
+    ) -> AsyncIterator[ContractEventMessage]:
+        """Yield the contract event backlog and any future events for one run."""
+
+        record = self.get_run(run_id)
+        async for message in record.bus.subscribe():
+            yield message
 
     def list_runs(self) -> list[ApiRunRecord]:
         """Return stored runs in insertion order."""
 
         return list(self.runs.values())
 
-    def reset(self) -> None:
-        """Clear demo runs and start a fresh shared ledger."""
+    def latest_run(self) -> ApiRunRecord | None:
+        """Return the most recently created run record, if any."""
 
+        if not self.runs:
+            return None
+        return next(reversed(self.runs.values()))
+
+    def reset(self) -> None:
+        """Clear demo runs, proposals, and the shared ledger."""
+
+        self.proposals = {}
         self.runs = {}
         self.ledger = HashLedger()
+
+    def build_run_snapshot(self, run_id: str) -> dict[str, Any]:
+        """Build the public poll-fallback snapshot for one run."""
+
+        record = self.get_run(run_id)
+        return record.to_snapshot()
 
     def verify_run(self, run_id: str) -> dict[str, Any]:
         """Verify one run's packet against the shared ledger state."""
 
         record = self.get_run(run_id)
+        if record.orchestrated_run is None:
+            raise ApiStateError(
+                f"Run '{run_id}' has not sealed proof yet.",
+                error_code="PROOF_NOT_READY",
+                status_code=409,
+            )
+
         current_entry = self._current_ledger_entry(record)
         proof_packet = record.orchestrated_run.proof_packet
         proof_hash = proof_packet.proof_hash()
@@ -158,6 +353,7 @@ class InMemoryApiState:
             "packet_entry_valid": packet_entry_valid,
             "proof_hash": proof_hash,
             "ledger_entry_hash": current_entry.entry_hash,
+            "chain_head": current_entry.entry_hash,
             "verified": ledger_chain_valid and packet_entry_valid and proof_hash_matches,
         }
 
@@ -165,6 +361,13 @@ class InMemoryApiState:
         """Mutate one ledger entry for demo purposes and return the new verification result."""
 
         record = self.get_run(run_id)
+        if record.orchestrated_run is None:
+            raise ApiStateError(
+                f"Run '{run_id}' has not sealed proof yet.",
+                error_code="PROOF_NOT_READY",
+                status_code=409,
+            )
+
         try:
             self.ledger.tamper_entry_for_demo(
                 record.orchestrated_run.ledger_entry.index,
@@ -173,20 +376,24 @@ class InMemoryApiState:
         except LedgerError as exc:
             raise ApiStateError(
                 "The demo ledger could not be tampered.",
-                error="TAMPER_FAILED",
+                error_code="TAMPER_FAILED",
                 status_code=500,
             ) from exc
 
-        self.runs[record.run_id] = record.model_copy(
-            update={
-                "tampered": True,
-                "tamper_reason": "Ledger packet hash replaced for demo tamper.",
-            }
-        )
-        return self.verify_run(run_id)
+        verification = self.verify_run(run_id)
+        verification["tampered_field"] = "packet_hash"
+        verification["verify_now"] = verification["verified"]
+        return verification
 
     def _current_ledger_entry(self, record: ApiRunRecord) -> LedgerEntry:
         """Resolve the current shared-ledger entry for a stored run."""
+
+        if record.orchestrated_run is None:
+            raise ApiStateError(
+                f"Run '{record.run_id}' has not sealed proof yet.",
+                error_code="PROOF_NOT_READY",
+                status_code=409,
+            )
 
         index = record.orchestrated_run.ledger_entry.index
         try:
@@ -194,14 +401,14 @@ class InMemoryApiState:
         except IndexError as exc:
             raise ApiStateError(
                 "The ledger entry for this run is missing.",
-                error="LEDGER_ENTRY_MISSING",
+                error_code="LEDGER_ENTRY_MISSING",
                 status_code=500,
             ) from exc
 
         if entry.run_id != record.run_id:
             raise ApiStateError(
                 "The ledger entry for this run is inconsistent.",
-                error="LEDGER_ENTRY_MISMATCH",
+                error_code="LEDGER_ENTRY_MISMATCH",
                 status_code=500,
             )
 

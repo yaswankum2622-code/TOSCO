@@ -33,7 +33,7 @@ function DecisionHero({ run, timeline }: DecisionHeroProps) {
       transition={{ duration: 0.26 }}
     >
       <div className="panel__header">
-        <h2 id="decision-hero-heading">Decision Hero</h2>
+        <h2 id="decision-hero-heading">Decision</h2>
         <span className="mono-label">{status ?? "Awaiting verdict"}</span>
       </div>
       {!run ? (
@@ -51,19 +51,19 @@ function DecisionHero({ run, timeline }: DecisionHeroProps) {
           <div className="kv-grid">
             <div>
               <span className="kv-label">Allow execution</span>
-              <span className="kv-value">{yesNo(run.allow_execution)}</span>
+              <span className="kv-value mono-value">{yesNo(run.allow_execution)}</span>
             </div>
             <div>
               <span className="kv-label">Mock bank status</span>
-              <span className="kv-value">{run.mock_bank_status}</span>
+              <span className="kv-value mono-value">{run.mock_bank_status}</span>
             </div>
             <div>
               <span className="kv-label">Mock bank reason</span>
-              <span className="kv-value">{run.mock_bank_reason_code}</span>
+              <span className="kv-value mono-value">{run.mock_bank_reason_code}</span>
             </div>
             <div>
               <span className="kv-label">Reason codes</span>
-              <span className="kv-value">{reasonCodes.join(", ") || "-"}</span>
+              <span className="kv-value mono-value">{reasonCodes.join(", ") || "-"}</span>
             </div>
           </div>
         </div>

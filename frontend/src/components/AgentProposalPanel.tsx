@@ -1,27 +1,21 @@
 import { motion, useReducedMotion } from "framer-motion";
 
-import type { EventTimelineResponse, RunSummaryResponse } from "../api/types";
 import { formatMoney } from "../utils/format";
-import { findEvent, payloadNumber, payloadString } from "../utils/timeline";
+import type { RunProposalState } from "../run/store";
 
 interface AgentProposalPanelProps {
-  run: RunSummaryResponse | null;
-  timeline: EventTimelineResponse | null;
+  proposal: RunProposalState | null;
 }
 
-function AgentProposalPanel({ run, timeline }: AgentProposalPanelProps) {
+function AgentProposalPanel({ proposal }: AgentProposalPanelProps) {
   const shouldReduceMotion = useReducedMotion();
-  const event = findEvent(timeline?.events, "AGENT_PROPOSED");
-  const payload = event?.payload;
-  const scenario = payloadString(payload, "scenario") ?? run?.scenario;
-  const naiveAction = payloadString(payload, "naive_action");
-  const vendorId = payloadString(payload, "vendor_id");
-  const amount = payloadNumber(payload, "amount");
-  const bankAccountLast4 = payloadString(payload, "bank_account_last4");
+  const request = proposal?.request ?? null;
+  const scenario = request?.scenario ?? null;
+  const amount = request ? formatMoney(request.action.amount, request.action.currency) : null;
 
   return (
     <motion.section
-      className="panel"
+      className="panel agent-proposal-panel"
       aria-labelledby="agent-proposal-heading"
       initial={shouldReduceMotion ? false : { opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
@@ -32,30 +26,39 @@ function AgentProposalPanel({ run, timeline }: AgentProposalPanelProps) {
         <span className="mono-label">{scenario ?? "Awaiting proposal"}</span>
       </div>
       <p className="panel__subcopy">The agent proposes. It does not clear.</p>
-      {!event ? (
-        <p className="empty-state">The proposal payload appears after the backend emits AGENT_PROPOSED.</p>
+      {!request ? (
+        <p className="empty-state">The proposal appears as soon as a scenario starts.</p>
       ) : (
         <div className="proposal-card">
-          <div>
-            <span className="kv-label">Naive action</span>
-            <strong className="proposal-card__action">{naiveAction ?? "—"}</strong>
+          <div className="proposal-card__hero">
+            <div className="proposal-card__hero-copy">
+              <span className="kv-label">Intended move</span>
+              <strong className="proposal-card__amount">{amount}</strong>
+              <span className="proposal-card__route mono-value">
+                {request.action.vendor_id} -&gt; .... {request.action.bank_account_last4}
+              </span>
+            </div>
+            <div className="proposal-card__intent">
+              <span className="kv-label">Intent ID</span>
+              <strong className="proposal-card__action">{proposal?.intentId ?? "pending"}</strong>
+            </div>
           </div>
           <div className="kv-grid">
             <div>
               <span className="kv-label">Vendor ID</span>
-              <span className="kv-value">{vendorId ?? "—"}</span>
+              <span className="kv-value mono-value">{request.action.vendor_id}</span>
             </div>
             <div>
               <span className="kv-label">Amount</span>
-              <span className="kv-value">{formatMoney(amount)}</span>
+              <span className="kv-value mono-value">{amount}</span>
             </div>
             <div>
               <span className="kv-label">Bank account</span>
-              <span className="kv-value">{bankAccountLast4 ? `•••• ${bankAccountLast4}` : "—"}</span>
+              <span className="kv-value mono-value">{`.... ${request.action.bank_account_last4}`}</span>
             </div>
             <div>
               <span className="kv-label">Scenario</span>
-              <span className="kv-value">{scenario ?? "—"}</span>
+              <span className="kv-value mono-value">{scenario}</span>
             </div>
           </div>
         </div>

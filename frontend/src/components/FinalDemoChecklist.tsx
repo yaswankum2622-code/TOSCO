@@ -1,14 +1,23 @@
+import type { VerifyRunResponse, VultrStatusResponse } from "../api/types";
 import type {
-  EventTimelineResponse,
-  RunSummaryResponse,
-  VerifyRunResponse,
-  VultrStatusResponse
-} from "../api/types";
-import { findEvent, findEvents } from "../utils/timeline";
+  RunBankState,
+  RunDecisionState,
+  RunGateState,
+  RunProofState,
+  RunProposalState,
+  RunStation,
+  RunTokenState
+} from "../run/store";
 
 interface FinalDemoChecklistProps {
-  activeRun: RunSummaryResponse | null;
-  timeline: EventTimelineResponse | null;
+  proposal: RunProposalState | null;
+  stations: RunStation[];
+  gates: RunGateState[];
+  decision: RunDecisionState | null;
+  token: RunTokenState | null;
+  bank: RunBankState | null;
+  proof: RunProofState | null;
+  fallbackMode: boolean;
   verification: VerifyRunResponse | null;
   vultrStatus: VultrStatusResponse | null;
 }
@@ -19,55 +28,52 @@ interface ChecklistItem {
   detail?: string;
 }
 
+function stationComplete(stations: RunStation[], id: string): boolean {
+  const station = stations.find((item) => item.id === id);
+  return station?.status === "pass" || station?.status === "fail";
+}
+
 function FinalDemoChecklist({
-  activeRun,
-  timeline,
+  proposal,
+  stations,
+  gates,
+  decision,
+  token,
+  bank,
+  proof,
+  fallbackMode,
   verification,
   vultrStatus
 }: FinalDemoChecklistProps) {
-  const events = timeline?.events;
-  const gateCount = findEvents(events, "GATE_COMPLETED").length;
-  const tokenRuleSatisfied = activeRun
-    ? activeRun.allow_execution
-      ? activeRun.token_issued && Boolean(findEvent(events, "CLEARANCE_TOKEN_ISSUED"))
-      : !activeRun.token_issued && Boolean(findEvent(events, "CLEARANCE_TOKEN_SKIPPED"))
-    : false;
-
-  const vultrDetail = findEvent(events, "VULTR_EXTRACTION_SUCCEEDED")
-    ? "Live extraction used"
-    : findEvent(events, "VULTR_EXTRACTION_FALLBACK")
-      ? "Fallback extraction used"
-      : vultrStatus?.configured
-        ? "Ready for live extraction"
-        : vultrStatus
-          ? "Fallback ready"
-          : "Awaiting status";
+  const completedGates = gates.filter((gate) => gate.status === "PASS" || gate.status === "WARN" || gate.status === "FAIL").length;
+  const tokenRuleSatisfied =
+    decision === null
+      ? false
+      : decision.value === "ALLOW"
+        ? token?.issued === true
+        : token === null;
 
   const items: ChecklistItem[] = [
     {
       label: "Agent proposed payment",
-      complete: Boolean(findEvent(events, "AGENT_PROPOSED"))
+      complete: proposal?.accepted === true
     },
     {
-      label: "Evidence retrieved",
-      complete: Boolean(findEvent(events, "EVIDENCE_RETRIEVED"))
+      label: "Evidence loaded (seeded)",
+      complete: stationComplete(stations, "evidence")
     },
     {
       label: "Extraction sealed",
-      complete: Boolean(findEvent(events, "EXTRACTION_SEALED"))
+      complete: stationComplete(stations, "extraction")
     },
     {
-      label: "Six deterministic gates executed",
-      complete: gateCount >= 6,
-      detail: gateCount > 0 ? `${gateCount}/6 recorded` : undefined
+      label: "Five deterministic gates executed",
+      complete: completedGates === gates.length,
+      detail: `${completedGates}/${gates.length} recorded`
     },
     {
       label: "Proof Packet sealed",
-      complete: Boolean(findEvent(events, "PROOF_SEALED"))
-    },
-    {
-      label: "SHA-256 ledger appended",
-      complete: Boolean(findEvent(events, "LEDGER_APPENDED"))
+      complete: proof?.sealed === true
     },
     {
       label: "Clearance token issued only for ALLOW",
@@ -75,9 +81,11 @@ function FinalDemoChecklist({
     },
     {
       label: "Mock Bank enforced token",
-      complete:
-        Boolean(findEvent(events, "EXECUTION_ATTEMPTED")) &&
-        Boolean(findEvent(events, "EXECUTION_ACCEPTED") ?? findEvent(events, "EXECUTION_REJECTED"))
+      complete: bank !== null
+    },
+    {
+      label: "Sentinel recorded attack pattern",
+      complete: decision !== null && decision.value !== "ALLOW"
     },
     {
       label: "Tamper demo breaks verification",
@@ -86,7 +94,7 @@ function FinalDemoChecklist({
     {
       label: "Vultr extraction path available",
       complete: vultrStatus?.mode === "serverless-inference",
-      detail: vultrDetail
+      detail: fallbackMode ? "Fallback extraction used" : "Live extraction used"
     }
   ];
 

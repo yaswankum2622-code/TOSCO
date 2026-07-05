@@ -43,6 +43,7 @@ def _clean_success_result() -> VultrExtractionResult:
         source_spans=seed.source_spans,
         model="fake-vultr-model",
         raw_content_hash="a" * 64,
+        latency_ms=184,
     )
 
 
@@ -66,6 +67,15 @@ def test_run_scenario_with_use_vultr_true_and_fake_success_uses_vultr_extraction
     assert run.run_context.fallback_mode is False
     assert "VULTR_EXTRACTION_STARTED" in run.timeline.event_types
     assert "VULTR_EXTRACTION_SUCCEEDED" in run.timeline.event_types
+    extraction_started = next(
+        event for event in run.timeline.events if event.event_type == "EXTRACTION_STARTED"
+    )
+    extraction_sealed = next(
+        event for event in run.timeline.events if event.event_type == "EXTRACTION_SEALED"
+    )
+    assert extraction_started.payload["source"] == "vultr"
+    assert extraction_started.payload["latency_ms"] == 184
+    assert extraction_sealed.payload["latency_ms"] == 184
 
 
 def test_run_scenario_with_use_vultr_true_and_fake_failure_uses_fallback() -> None:
@@ -75,6 +85,7 @@ def test_run_scenario_with_use_vultr_true_and_fake_failure_uses_fallback() -> No
             model="fake-vultr-model",
             error_code="VULTR_HTTP_ERROR",
             error_message="temporary outage",
+            latency_ms=912,
         )
     )
 
@@ -88,6 +99,15 @@ def test_run_scenario_with_use_vultr_true_and_fake_failure_uses_fallback() -> No
     assert run.run_context.fallback_mode is True
     assert "VULTR_EXTRACTION_STARTED" in run.timeline.event_types
     assert "VULTR_EXTRACTION_FALLBACK" in run.timeline.event_types
+    extraction_started = next(
+        event for event in run.timeline.events if event.event_type == "EXTRACTION_STARTED"
+    )
+    extraction_sealed = next(
+        event for event in run.timeline.events if event.event_type == "EXTRACTION_SEALED"
+    )
+    assert extraction_started.payload["source"] == "fallback"
+    assert extraction_started.payload["latency_ms"] == 912
+    assert extraction_sealed.payload["latency_ms"] == 912
 
 
 def test_vultr_cannot_decide_verdict() -> None:
@@ -105,10 +125,13 @@ def test_vultr_cannot_decide_verdict() -> None:
 
 
 def test_api_vultr_status_never_leaks_key(monkeypatch) -> None:
+    monkeypatch.setenv("TOSCO_LOAD_DOTENV", "false")
+    monkeypatch.delenv("VULTR_INFERENCE_URL", raising=False)
+    monkeypatch.delenv("VULTR_INFERENCE_BASE_URL", raising=False)
     monkeypatch.setenv("VULTR_API_KEY", "secret-vultr-key")
     monkeypatch.setenv(
-        "VULTR_CHAT_MODEL",
-        "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16",
+        "VULTR_MODEL",
+        "qwen2.5-32b-instruct",
     )
 
     with TestClient(create_app()) as client:
@@ -117,14 +140,49 @@ def test_api_vultr_status_never_leaks_key(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["configured"] is True
-    assert isinstance(payload["key_present"], bool)
+    assert payload["key_present"] is True
+    assert payload["mode"] == "serverless-inference"
+    assert payload["base_url"] == "https://api.vultrinference.com/v1"
+    assert payload["model"] == "qwen2.5-32b-instruct"
     assert "secret-vultr-key" not in response.text
+
+
+def test_api_vultr_status_reports_unconfigured_without_key(monkeypatch) -> None:
+    monkeypatch.setenv("TOSCO_LOAD_DOTENV", "false")
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.delenv("VULTR_INFERENCE_URL", raising=False)
+    monkeypatch.delenv("VULTR_INFERENCE_BASE_URL", raising=False)
+    monkeypatch.delenv("VULTR_MODEL", raising=False)
+    monkeypatch.delenv("VULTR_CHAT_MODEL", raising=False)
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/integrations/vultr/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["key_present"] is False
+    assert payload["mode"] == "serverless-inference"
+    assert "api_key" not in response.text.lower()
+
+
+def test_health_reports_latest_run_fallback_mode() -> None:
+    with TestClient(create_app()) as client:
+        started = client.post(
+            "/api/runs/start?format=summary",
+            json={"scenario": "clean", "use_vultr": False},
+        )
+        health = client.get("/api/health")
+
+    assert started.status_code == 200
+    assert health.status_code == 200
+    assert health.json()["fallback_mode"] is True
 
 
 def test_post_runs_start_with_use_vultr_false_still_works() -> None:
     with TestClient(create_app()) as client:
         response = client.post(
-            "/api/runs/start",
+            "/api/runs/start?format=summary",
             json={"scenario": "clean", "use_vultr": False},
         )
 
@@ -133,15 +191,16 @@ def test_post_runs_start_with_use_vultr_false_still_works() -> None:
 
 
 def test_post_runs_start_with_use_vultr_true_works_unconfigured_by_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("TOSCO_LOAD_DOTENV", "false")
     monkeypatch.delenv("VULTR_API_KEY", raising=False)
     monkeypatch.setenv("TOSCO_FALLBACK", "true")
 
     with TestClient(create_app()) as client:
         started = client.post(
-            "/api/runs/start",
+            "/api/runs/start?format=summary",
             json={"scenario": "clean", "use_vultr": True},
         )
-        events = client.get(f"/api/runs/{started.json()['run_id']}/events")
+        events = client.get(f"/api/runs/{started.json()['run_id']}/events?format=json")
 
     assert started.status_code == 200
     assert started.json()["final_decision"] == "ALLOW"
