@@ -163,7 +163,10 @@ describe("ui polish", () => {
 
     expect(await screen.findByTestId("console-grid")).toBeInTheDocument();
     expect(screen.getByText("Agents propose. TOSCO clears. Execution obeys. Audit proves.")).toBeInTheDocument();
-    expect(screen.getByText("$3.05B lost to BEC last year")).toBeInTheDocument();
+    expect(
+      screen.getByText("Trust-Orchestrated Settlement & Control OS", { exact: false })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("$3.05B lost to BEC last year")).not.toBeInTheDocument();
     expect(screen.getByText("Trace every proposal")).toBeInTheDocument();
     expect(screen.getByText("Gate deterministically")).toBeInTheDocument();
     expect(screen.getByText("Seal every outcome")).toBeInTheDocument();
@@ -175,14 +178,15 @@ describe("ui polish", () => {
 
   it("keeps the three-column desktop grid, mobile stack, and updated palette contract", () => {
     expect(themeCss).toContain("grid-template-columns: 300px minmax(0, 1fr) 380px;");
-    expect(themeCss).toContain("--canvas: #070312;");
-    expect(themeCss).toContain("--panel: #100a1d;");
-    expect(themeCss).toContain("--cyan: #6ed8ff;");
-    expect(themeCss).toContain("--pink: #f472b6;");
+    expect(themeCss).toContain("--bg: #000000;");
+    expect(themeCss).toContain("--panel: #0a0c10;");
+    expect(themeCss).toContain("--accent: #3b82f6;");
+    expect(themeCss).not.toContain("--cyan:");
+    expect(themeCss).not.toContain("--pink:");
+    expect(themeCss).not.toContain("139, 92, 246");
     expect(themeCss).toContain("@media (max-width: 900px)");
     expect(themeCss).toContain("grid-template-columns: 1fr;");
-    expect(appCss).toContain("linear-gradient(135deg, rgba(139, 92, 246, 0.34), rgba(110, 216, 255, 0.12))");
-    expect(appCss).toContain(".scenario-card--injection::before");
+    expect(appCss).toContain("background: var(--panel);");
   });
 
   it("after clean run shows the event-bound allow outcome stack", async () => {

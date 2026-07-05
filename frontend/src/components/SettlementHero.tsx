@@ -98,7 +98,7 @@ function SettlementHero({ collapsed }: SettlementHeroProps) {
         transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: "easeInOut" }}
       >
         <div className="settlement-hero__brandline">
-          <span className="settlement-hero__eyebrow">Settlement Terminal</span>
+          <span className="settlement-hero__eyebrow">Trust-Orchestrated Settlement &amp; Control OS</span>
           <h1 className="settlement-hero__wordmark">TOSCO</h1>
         </div>
         <motion.div
@@ -107,17 +107,13 @@ function SettlementHero({ collapsed }: SettlementHeroProps) {
           animate={{
             opacity: collapsed ? 0 : 1,
             y: collapsed ? -8 : 0,
-            maxHeight: collapsed ? 0 : 120
+            maxHeight: collapsed ? 0 : 80
           }}
           transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.28, ease: "easeOut" }}
         >
           <p className="settlement-hero__tagline">
             Agents propose. TOSCO clears. Execution obeys. Audit proves.
           </p>
-          <div className="settlement-hero__statline">
-            <span className="settlement-hero__stat-label">BEC exposure</span>
-            <span className="settlement-hero__stat-value">$3.05B lost to BEC last year</span>
-          </div>
         </motion.div>
         <motion.div
           className="settlement-hero__cards"
