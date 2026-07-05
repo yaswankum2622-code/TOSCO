@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 
 import type { RunStoreState } from "../../run/store";
 import { shortHash } from "../../utils/format";
+import { downloadProofPacketPdf } from "../../utils/proofPdf";
 
 interface ProofPacketViewerProps {
   state: RunStoreState;
@@ -37,9 +38,19 @@ function ProofPacketViewer({ state }: ProofPacketViewerProps) {
     >
       <div className="panel__header">
         <h2 id="proof-packet-heading">Audit Packet</h2>
-        <button className="ghost-button right-card__toggle" type="button" onClick={() => setOpen((value) => !value)}>
-          {open ? "Hide details" : "Show details"}
-        </button>
+        <div className="button-row">
+          <button
+            className="ghost-button right-card__toggle"
+            type="button"
+            data-testid="download-proof-pdf"
+            onClick={() => downloadProofPacketPdf(state)}
+          >
+            Download Proof Packet (PDF)
+          </button>
+          <button className="ghost-button right-card__toggle" type="button" onClick={() => setOpen((value) => !value)}>
+            {open ? "Hide details" : "Show details"}
+          </button>
+        </div>
       </div>
       <div className="proof-packet-viewer__summary">
         <div className="right-card__mono-block">
