@@ -23,7 +23,8 @@ from app.engine.mock_bank import (
     build_payment_request_from_context,
 )
 from app.engine.pipeline import ClearanceOutcome, run_clearance
-from app.engine.proof import ProofPacket, create_proof_packet
+from app.engine.proof import HumanReviewRecord, ProofPacket, create_proof_packet
+from app.engine.review import requires_human_review
 from app.engine.token import ClearanceToken, TokenError, issue_clearance_token
 from app.engine.workflow import load_workflow_definition
 from app.integrations.vultr import VultrExtractionResult, VultrInferenceClient, VultrSettings
@@ -46,6 +47,19 @@ def _require_non_empty(value: str, field_name: str) -> str:
 
 class OrchestratorError(RuntimeError):
     """Signal invalid scenario orchestration state or failures."""
+
+
+@dataclass(frozen=True, slots=True)
+class PendingReviewContext:
+    """Hold paused run state until a reviewer approves or rejects clearance."""
+
+    seed: ScenarioSeed
+    proposal: AgentProposal
+    run_context: RunContext
+    outcome: ClearanceOutcome
+    active_config: OrchestratorConfig
+    review_reason: str
+    partial_timeline: EventTimeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,11 +102,13 @@ class OrchestratedRun(BaseModel):
     proposal: AgentProposal
     run_context: RunContext
     outcome: ClearanceOutcome
-    proof_packet: ProofPacket
-    ledger_entry: LedgerEntry
+    awaiting_review: bool = False
+    review_reason: str | None = None
+    proof_packet: ProofPacket | None = None
+    ledger_entry: LedgerEntry | None = None
     clearance_token: ClearanceToken | None = None
-    payment_request: PaymentExecutionRequest
-    execution_result: MockBankExecutionResult
+    payment_request: PaymentExecutionRequest | None = None
+    execution_result: MockBankExecutionResult | None = None
     timeline: EventTimeline
 
     @computed_field
@@ -107,6 +123,10 @@ class OrchestratedRun(BaseModel):
     def allow_execution(self) -> bool:
         """Expose the execution eligibility directly for convenience."""
 
+        if self.awaiting_review:
+            return False
+        if self.proof_packet is not None:
+            return self.proof_packet.allow_execution
         return self.outcome.allow_execution
 
 
@@ -308,6 +328,227 @@ def _resolve_run_context(
         run_context=_build_run_context(seed, proposal, fallback_mode=True),
         source="fallback",
         latency_ms=extraction_result.latency_ms,
+    )
+
+
+def _finalize_orchestrated_run(
+    *,
+    timeline_builder: TimelineBuilder,
+    run_context: RunContext,
+    outcome: ClearanceOutcome,
+    seed: ScenarioSeed,
+    proposal: AgentProposal,
+    active_config: OrchestratorConfig,
+    active_ledger: HashLedger,
+    contract_event_emitter: ContractEventEmitter | None,
+    human_review: HumanReviewRecord | None = None,
+    final_decision: Decision | None = None,
+    allow_execution: bool | None = None,
+) -> OrchestratedRun:
+    """Seal proof, append ledger, issue token when allowed, and execute through the mock bank."""
+
+    proof_packet = create_proof_packet(
+        run_context,
+        outcome,
+        human_review=human_review,
+        final_decision=final_decision,
+        allow_execution=allow_execution,
+    )
+    timeline_builder.add(
+        EventType.PROOF_SEALED.value,
+        "Proof Packet Sealed",
+        "A deterministic proof packet was created for the clearance decision.",
+        {
+            "proof_hash": proof_packet.proof_hash(),
+            "final_decision": proof_packet.final_decision.value,
+        },
+    )
+
+    ledger_entry = active_ledger.append(proof_packet)
+    timeline_builder.add(
+        EventType.LEDGER_APPENDED.value,
+        "Ledger Appended",
+        "The proof packet hash was appended to the in-memory SHA-256 ledger.",
+        {
+            "ledger_index": ledger_entry.index,
+            "ledger_entry_hash": ledger_entry.entry_hash,
+            "previous_hash": ledger_entry.previous_hash,
+        },
+    )
+
+    clearance_token: ClearanceToken | None = None
+    if proof_packet.allow_execution:
+        try:
+            clearance_token = issue_clearance_token(
+                ctx=run_context,
+                outcome=outcome,
+                packet=proof_packet,
+                ledger_entry=ledger_entry,
+                secret=active_config.token_secret,
+                issued_at=active_config.issued_at,
+                expires_at=active_config.expires_at,
+            )
+        except TokenError as exc:
+            raise OrchestratorError(f"Token issuance failed: {exc}") from exc
+
+        timeline_builder.add(
+            EventType.CLEARANCE_TOKEN_ISSUED.value,
+            "Clearance Token Issued",
+            "A clearance token was issued because the run was allowed to execute.",
+            {
+                "token_id": clearance_token.token_id,
+                "expires_at": clearance_token.expires_at,
+            },
+        )
+        _emit_contract_event(
+            contract_event_emitter,
+            "TOKEN_ISSUED",
+            {
+                "token_id": clearance_token.token_id,
+                "expires_at": clearance_token.expires_at,
+                "token": clearance_token.model_dump_json(),
+            },
+        )
+    else:
+        timeline_builder.add(
+            EventType.CLEARANCE_TOKEN_SKIPPED.value,
+            "Clearance Token Skipped",
+            "No clearance token was issued because only ALLOW outcomes can execute.",
+            {
+                "final_decision": proof_packet.final_decision.value,
+                "reason": "Token is issued only for ALLOW outcomes.",
+            },
+        )
+
+    _emit_contract_event(
+        contract_event_emitter,
+        EventType.PROOF_SEALED.value,
+        {
+            "proof_hash": proof_packet.proof_hash(),
+            "final_decision": proof_packet.final_decision.value,
+        },
+    )
+
+    payment_request = build_payment_request_from_context(run_context, clearance_token)
+    execution_payload = {
+        "run_id": payment_request.run_id,
+        "token_id": payment_request.token_id,
+        "amount": payment_request.amount,
+        "bank_account_last4": payment_request.bank_account_last4,
+    }
+    timeline_builder.add(
+        EventType.EXECUTION_ATTEMPTED.value,
+        "Execution Attempted",
+        "The Mock Bank evaluated whether the payment request matched a valid clearance token.",
+        execution_payload,
+    )
+    _emit_contract_event(contract_event_emitter, EventType.EXECUTION_ATTEMPTED.value, execution_payload)
+
+    execution_result = attempt_mock_bank_execution(
+        payment_request,
+        token=clearance_token,
+        secret=active_config.token_secret,
+        now=active_config.now,
+        expected_packet_hash=proof_packet.proof_hash(),
+        expected_ledger_entry_hash=ledger_entry.entry_hash,
+    )
+
+    if execution_result.accepted:
+        timeline_builder.add(
+            EventType.EXECUTION_ACCEPTED.value,
+            "Execution Accepted",
+            "The Mock Bank accepted the payment because the clearance token matched exactly.",
+            {
+                "execution_reference": execution_result.execution_reference,
+                "reason_code": execution_result.reason_code,
+            },
+        )
+    else:
+        timeline_builder.add(
+            EventType.EXECUTION_REJECTED.value,
+            "Execution Rejected",
+            "The Mock Bank rejected the payment because the enforcement check failed.",
+            {
+                "reason_code": execution_result.reason_code,
+                "human_reason": execution_result.human_reason,
+            },
+        )
+
+    timeline = timeline_builder.build()
+    return OrchestratedRun(
+        scenario=seed.scenario,
+        seed=seed,
+        proposal=proposal,
+        run_context=run_context,
+        outcome=outcome,
+        proof_packet=proof_packet,
+        ledger_entry=ledger_entry,
+        clearance_token=clearance_token,
+        payment_request=payment_request,
+        execution_result=execution_result,
+        timeline=timeline,
+    )
+
+
+def complete_run_after_review(
+    pending: PendingReviewContext,
+    *,
+    reviewer_id: str,
+    action: str,
+    approved_at: str,
+    ledger: HashLedger,
+    contract_event_emitter: ContractEventEmitter | None = None,
+) -> OrchestratedRun:
+    """Resume a paused run after human review and finalize proof, token, and execution."""
+
+    normalized_action = action.strip().upper()
+    if normalized_action not in {"APPROVED", "REJECTED"}:
+        raise OrchestratorError("Review action must be APPROVED or REJECTED.")
+
+    review_record = HumanReviewRecord(
+        reviewer_id=reviewer_id,
+        approved_at=approved_at,
+        action=normalized_action,
+        review_reason=pending.review_reason,
+    )
+
+    if normalized_action == "APPROVED":
+        resolved_decision = Decision.ALLOW
+        resolved_allow = True
+    else:
+        resolved_decision = Decision.BLOCK
+        resolved_allow = False
+
+    timeline_builder = TimelineBuilder.from_timeline(pending.partial_timeline)
+    review_completed_payload = {
+        "reviewer_id": reviewer_id,
+        "action": normalized_action,
+        "approved_at": approved_at,
+    }
+    timeline_builder.add(
+        EventType.REVIEW_COMPLETED.value,
+        "Review Completed",
+        f"Reviewer {reviewer_id} recorded action {normalized_action}.",
+        review_completed_payload,
+    )
+    _emit_contract_event(
+        contract_event_emitter,
+        EventType.REVIEW_COMPLETED.value,
+        review_completed_payload,
+    )
+
+    return _finalize_orchestrated_run(
+        timeline_builder=timeline_builder,
+        run_context=pending.run_context,
+        outcome=pending.outcome,
+        seed=pending.seed,
+        proposal=pending.proposal,
+        active_config=pending.active_config,
+        active_ledger=ledger,
+        contract_event_emitter=contract_event_emitter,
+        human_review=review_record,
+        final_decision=resolved_decision,
+        allow_execution=resolved_allow,
     )
 
 
@@ -526,140 +767,40 @@ def run_from_seed(
     )
     _emit_contract_event(contract_event_emitter, EventType.DECISION_MADE.value, decision_payload)
 
-    proof_packet = create_proof_packet(run_context, outcome)
-    timeline_builder.add(
-        EventType.PROOF_SEALED.value,
-        "Proof Packet Sealed",
-        "A deterministic proof packet was created for the clearance decision.",
-        {
-            "proof_hash": proof_packet.proof_hash(),
-            "final_decision": proof_packet.final_decision.value,
-        },
-    )
-
-    ledger_entry = active_ledger.append(proof_packet)
-    timeline_builder.add(
-        EventType.LEDGER_APPENDED.value,
-        "Ledger Appended",
-        "The proof packet hash was appended to the in-memory SHA-256 ledger.",
-        {
-            "ledger_index": ledger_entry.index,
-            "ledger_entry_hash": ledger_entry.entry_hash,
-            "previous_hash": ledger_entry.previous_hash,
-        },
-    )
-
-    clearance_token: ClearanceToken | None = None
-    if outcome.allow_execution:
-        try:
-            clearance_token = issue_clearance_token(
-                ctx=run_context,
-                outcome=outcome,
-                packet=proof_packet,
-                ledger_entry=ledger_entry,
-                secret=active_config.token_secret,
-                issued_at=active_config.issued_at,
-                expires_at=active_config.expires_at,
-            )
-        except TokenError as exc:
-            raise OrchestratorError(f"Token issuance failed: {exc}") from exc
-
+    needs_review, review_reason = requires_human_review(outcome)
+    if needs_review:
+        review_payload = {
+            "review_reason": review_reason,
+            "final_decision": outcome.final_decision.value,
+        }
         timeline_builder.add(
-            EventType.CLEARANCE_TOKEN_ISSUED.value,
-            "Clearance Token Issued",
-            "A clearance token was issued because the run was allowed to execute.",
-            {
-                "token_id": clearance_token.token_id,
-                "expires_at": clearance_token.expires_at,
-            },
+            EventType.REVIEW_REQUIRED.value,
+            "Review Required",
+            review_reason,
+            review_payload,
         )
-        _emit_contract_event(
-            contract_event_emitter,
-            "TOKEN_ISSUED",
-            {
-                "token_id": clearance_token.token_id,
-                "expires_at": clearance_token.expires_at,
-                "token": clearance_token.model_dump_json(),
-            },
-        )
-    else:
-        timeline_builder.add(
-            EventType.CLEARANCE_TOKEN_SKIPPED.value,
-            "Clearance Token Skipped",
-            "No clearance token was issued because only ALLOW outcomes can execute.",
-            {
-                "final_decision": outcome.final_decision.value,
-                "reason": "Token is issued only for ALLOW outcomes.",
-            },
+        _emit_contract_event(contract_event_emitter, "REVIEW_REQUIRED", review_payload)
+        partial_timeline = timeline_builder.build()
+        return OrchestratedRun(
+            scenario=seed.scenario,
+            seed=seed,
+            proposal=active_proposal,
+            run_context=run_context,
+            outcome=outcome,
+            awaiting_review=True,
+            review_reason=review_reason,
+            timeline=partial_timeline,
         )
 
-    _emit_contract_event(
-        contract_event_emitter,
-        EventType.PROOF_SEALED.value,
-        {
-            "proof_hash": proof_packet.proof_hash(),
-            "final_decision": proof_packet.final_decision.value,
-        },
-    )
-
-    payment_request = build_payment_request_from_context(run_context, clearance_token)
-    execution_payload = {
-        "run_id": payment_request.run_id,
-        "token_id": payment_request.token_id,
-        "amount": payment_request.amount,
-        "bank_account_last4": payment_request.bank_account_last4,
-    }
-    timeline_builder.add(
-        EventType.EXECUTION_ATTEMPTED.value,
-        "Execution Attempted",
-        "The Mock Bank evaluated whether the payment request matched a valid clearance token.",
-        execution_payload,
-    )
-    _emit_contract_event(contract_event_emitter, EventType.EXECUTION_ATTEMPTED.value, execution_payload)
-
-    execution_result = attempt_mock_bank_execution(
-        payment_request,
-        token=clearance_token,
-        secret=active_config.token_secret,
-        now=active_config.now,
-        expected_packet_hash=proof_packet.proof_hash(),
-        expected_ledger_entry_hash=ledger_entry.entry_hash,
-    )
-
-    if execution_result.accepted:
-        timeline_builder.add(
-            EventType.EXECUTION_ACCEPTED.value,
-            "Execution Accepted",
-            "The Mock Bank accepted the payment because the clearance token matched exactly.",
-            {
-                "execution_reference": execution_result.execution_reference,
-                "reason_code": execution_result.reason_code,
-            },
-        )
-    else:
-        timeline_builder.add(
-            EventType.EXECUTION_REJECTED.value,
-            "Execution Rejected",
-            "The Mock Bank rejected the payment because the enforcement check failed.",
-            {
-                "reason_code": execution_result.reason_code,
-                "human_reason": execution_result.human_reason,
-            },
-        )
-
-    timeline = timeline_builder.build()
-    return OrchestratedRun(
-        scenario=seed.scenario,
-        seed=seed,
-        proposal=active_proposal,
+    return _finalize_orchestrated_run(
+        timeline_builder=timeline_builder,
         run_context=run_context,
         outcome=outcome,
-        proof_packet=proof_packet,
-        ledger_entry=ledger_entry,
-        clearance_token=clearance_token,
-        payment_request=payment_request,
-        execution_result=execution_result,
-        timeline=timeline,
+        seed=seed,
+        proposal=active_proposal,
+        active_config=active_config,
+        active_ledger=active_ledger,
+        contract_event_emitter=contract_event_emitter,
     )
 
 
@@ -702,6 +843,9 @@ def run_all_demo_scenarios(
 
 def summarize_orchestrated_run(run: OrchestratedRun) -> dict[str, Any]:
     """Return a compact UI-ready summary of one orchestrated run."""
+
+    if run.awaiting_review or run.execution_result is None or run.proof_packet is None or run.ledger_entry is None:
+        raise OrchestratorError("Run summary is unavailable until review and finalization complete.")
 
     return {
         "scenario": run.scenario,

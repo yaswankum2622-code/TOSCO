@@ -43,6 +43,9 @@ function HashVerifier({ state, onVerify, onTamper, onReset, loading }: HashVerif
           {verification ? (verification.verified ? "VERIFIED" : "FAILED") : "Awaiting check"}
         </span>
       </div>
+      <p className="hash-verifier__caption">
+        SHA-256 hash chain — each record&apos;s hash includes the previous. Any edit breaks every later link.
+      </p>
       <div className="right-card__mono-block">
         <span className="kv-label">Chain head</span>
         <span className="mono-value" data-testid="hash-verifier-chain-head">
@@ -70,6 +73,14 @@ function HashVerifier({ state, onVerify, onTamper, onReset, loading }: HashVerif
               <span className="kv-label">Tampered field</span>
               <span className="mono-value" data-testid="hash-verifier-tampered-field">
                 {verification.tamperedField}
+              </span>
+            </div>
+          ) : null}
+          {verification.brokenRecordIndex !== null && !verification.verified ? (
+            <div className="right-card__mono-block hash-verifier__broken">
+              <span className="kv-label">Chain break</span>
+              <span className="mono-value" data-testid="hash-verifier-broken-record">
+                chain broken at record {verification.brokenRecordIndex}
               </span>
             </div>
           ) : null}

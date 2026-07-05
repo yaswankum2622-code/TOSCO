@@ -136,17 +136,22 @@ class HashLedger:
     def verify_chain(self) -> bool:
         """Recompute the full ledger chain and return whether it remains intact."""
 
+        return self.find_first_broken_index() is None
+
+    def find_first_broken_index(self) -> int | None:
+        """Return the first ledger row whose linkage no longer recomputes, if any."""
+
         expected_previous_hash = _GENESIS_HASH
         for expected_index, entry in enumerate(self._entries):
             try:
                 validated_entry = LedgerEntry.model_validate(entry.model_dump())
             except ValidationError:
-                return False
+                return expected_index
 
             if validated_entry.index != expected_index:
-                return False
+                return expected_index
             if validated_entry.previous_hash != expected_previous_hash:
-                return False
+                return expected_index
 
             expected_entry_hash = compute_entry_hash(
                 index=validated_entry.index,
@@ -155,11 +160,11 @@ class HashLedger:
                 previous_hash=validated_entry.previous_hash,
             )
             if validated_entry.entry_hash != expected_entry_hash:
-                return False
+                return expected_index
 
             expected_previous_hash = validated_entry.entry_hash
 
-        return True
+        return None
 
     def verify_packet_entry(self, packet: ProofPacket, entry: LedgerEntry) -> bool:
         """Check that a ledger entry still matches the supplied proof packet."""

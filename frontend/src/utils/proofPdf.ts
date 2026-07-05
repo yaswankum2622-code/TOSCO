@@ -84,7 +84,11 @@ export function buildProofPacketPdf(state: RunStoreState): jsPDF {
     y
   );
   y = line(doc, "Generated at", generatedAt, y);
-  y = line(doc, "Reviewer", "Not assigned (sandbox demo)", y);
+  const reviewerLine =
+    state.review?.resolved && state.review.reviewerId
+      ? `${state.review.reviewerId} | ${state.review.action ?? "REVIEWED"}`
+      : "Not assigned (sandbox demo)";
+  y = line(doc, "Reviewer", reviewerLine, y);
 
   return doc;
 }

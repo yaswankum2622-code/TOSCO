@@ -178,15 +178,17 @@ describe("ui polish", () => {
 
   it("keeps the three-column desktop grid, mobile stack, and updated palette contract", () => {
     expect(themeCss).toContain("grid-template-columns: 300px minmax(0, 1fr) 380px;");
-    expect(themeCss).toContain("--bg: #000000;");
-    expect(themeCss).toContain("--panel: #0a0c10;");
-    expect(themeCss).toContain("--accent: #3b82f6;");
+    expect(themeCss).toContain("--bg-main: #05070a;");
+    expect(themeCss).toContain("--bg-glass: rgba(255, 255, 255, 0.1);");
+    expect(themeCss).toContain("--accent: #6ec6ff;");
+    expect(themeCss).toContain("--allow: #22c55e;");
+    expect(themeCss).toContain("--block: #ef4444;");
+    expect(themeCss).toContain("--freeze: #f59e0b;");
     expect(themeCss).not.toContain("--cyan:");
     expect(themeCss).not.toContain("--pink:");
-    expect(themeCss).not.toContain("139, 92, 246");
     expect(themeCss).toContain("@media (max-width: 900px)");
     expect(themeCss).toContain("grid-template-columns: 1fr;");
-    expect(appCss).toContain("background: var(--panel);");
+    expect(appCss).toContain("backdrop-filter: blur(var(--glass-blur))");
   });
 
   it("after clean run shows the event-bound allow outcome stack", async () => {

@@ -27,7 +27,14 @@ function StationRow({ id, label, status, detail, forceFail = false, aux, overlay
     >
       <div className={`station-row__dot station-row__dot--${displayStatus}`} aria-hidden="true" />
       <div className="station-row__body">
-        <span className="station-row__label">{label}</span>
+        <div className="station-row__head">
+          <span className="station-row__label">{label}</span>
+          {status === "active" && !forceFail ? (
+            <span className="station-row__processing" aria-live="polite">
+              Processing
+            </span>
+          ) : null}
+        </div>
         <div className="station-row__detail-wrap">
           <div className="station-row__detail mono-value" data-testid={detailTestId}>
             {detail}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ApiError, apiClient } from "./api/client";
+import { ApiError, apiClient, formatCustomRunError } from "./api/client";
 import { createRunEventsClient, type RunEventsClient } from "./api/events";
 import { buildScenarioProposalRequest } from "./api/referenceProposals";
 import CustomRunCard from "./components/CustomRunCard";
@@ -26,6 +26,7 @@ import VultrStatusCard from "./components/VultrStatusCard";
 import ClearanceTokenCard from "./components/right/ClearanceTokenCard";
 import DecisionCard from "./components/right/DecisionCard";
 import HashVerifier from "./components/right/HashVerifier";
+import ReviewerCard from "./components/right/ReviewerCard";
 import MockBankExecutionCard from "./components/right/MockBankExecutionCard";
 import ProofPacketViewer from "./components/right/ProofPacketViewer";
 import SentinelMemoryCard from "./components/right/SentinelMemoryCard";
@@ -251,6 +252,9 @@ function AppContent() {
           dispatch({ type: "markComplete" });
           setRunning(false);
         },
+        onReviewRequired: () => {
+          setRunning(false);
+        },
         buildExecutionRequest
       });
     } catch (runError) {
@@ -295,10 +299,13 @@ function AppContent() {
           dispatch({ type: "markComplete" });
           setRunning(false);
         },
+        onReviewRequired: () => {
+          setRunning(false);
+        },
         buildExecutionRequest
       });
     } catch (runError) {
-      const message = formatError(runError);
+      const message = formatCustomRunError(runError);
       dispatch({ type: "setError", message });
       setError(message);
       setRunning(false);
@@ -414,29 +421,45 @@ function AppContent() {
           </AnimatePresence>
           <NaiveAgentStrip state={runState} />
           <ClearanceSpine state={runState} />
-          <EventTimeline timeline={timeline} />
+          <EventTimeline timeline={timeline} collapsed={runState.decision !== null} />
         </>
       }
       right={
         <>
-          <DecisionCard state={runState} />
-          <CounterfactualStrip
-            counterfactual={runState.counterfactual}
-            decision={runState.decision}
-            amount={runState.proposal?.request.action.amount ?? null}
-          />
-          <ClearanceTokenCard state={runState} />
-          <MockBankExecutionCard state={runState} onAttemptExecution={handleAttemptExecution} />
-          <ProofSeal state={runState} />
-          <ProofPacketViewer state={runState} />
-          <HashVerifier
-            state={runState}
-            onVerify={handleVerify}
-            onTamper={handleTamper}
-            onReset={handleReset}
-            loading={running}
-          />
-          <SentinelMemoryCard state={runState} />
+          <div className="outcome-rail">
+            <DecisionCard state={runState} />
+            <ReviewerCard
+              state={runState}
+              loading={running}
+              onReviewerIdChange={(reviewerId) => dispatch({ type: "setReviewReviewerId", reviewerId })}
+              onReviewSubmitted={() => setRunning(true)}
+              onError={setError}
+            />
+            <CounterfactualStrip
+              counterfactual={runState.counterfactual}
+              decision={runState.decision}
+              amount={runState.proposal?.request.action.amount ?? null}
+            />
+          </div>
+          <div className="enforcement-rail">
+            <ClearanceTokenCard state={runState} />
+            <MockBankExecutionCard state={runState} onAttemptExecution={handleAttemptExecution} />
+          </div>
+          <details className="system-drawer" data-testid="audit-drawer">
+            <summary className="system-drawer__summary">Proof chain</summary>
+            <div className="system-drawer__body">
+              <ProofSeal state={runState} />
+              <ProofPacketViewer state={runState} />
+              <HashVerifier
+                state={runState}
+                onVerify={handleVerify}
+                onTamper={handleTamper}
+                onReset={handleReset}
+                loading={running}
+              />
+              <SentinelMemoryCard state={runState} />
+            </div>
+          </details>
         </>
       }
     />

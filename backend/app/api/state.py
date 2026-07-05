@@ -15,6 +15,8 @@ from app.orchestrator.runner import (
     OrchestratedRun,
     OrchestratorConfig,
     OrchestratorError,
+    PendingReviewContext,
+    complete_run_after_review,
     run_from_seed,
 )
 from app.scenarios.loader import SCENARIOS, ScenarioLoadError, ScenarioSeed, load_scenario_seed
@@ -62,7 +64,9 @@ class ApiRunRecord:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     gate_results: list[dict[str, Any]] = field(default_factory=list)
     clearance_token: str | None = None
+    review_reason: str | None = None
     error_message: str | None = None
+    pending_review: PendingReviewContext | None = None
     completed_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     def to_snapshot(self) -> dict[str, Any]:
@@ -80,6 +84,7 @@ class ApiRunRecord:
             "decision": self.decision,
             "fallback_mode": self.fallback_mode,
             "clearance_token": self.clearance_token,
+            "review_reason": self.review_reason,
             "error_message": self.error_message,
         }
 
@@ -234,6 +239,36 @@ class InMemoryApiState:
             raise exc
 
         record.orchestrated_run = orchestrated_run
+
+        if orchestrated_run.awaiting_review:
+            record.status = "AWAITING_REVIEW"
+            record.review_reason = orchestrated_run.review_reason
+            record.pending_review = PendingReviewContext(
+                seed=orchestrated_run.seed,
+                proposal=orchestrated_run.proposal,
+                run_context=orchestrated_run.run_context,
+                outcome=orchestrated_run.outcome,
+                active_config=config,
+                review_reason=orchestrated_run.review_reason or "Human review required.",
+                partial_timeline=orchestrated_run.timeline,
+            )
+            record.decision = orchestrated_run.final_decision.value
+            record.extraction_hash = (
+                orchestrated_run.run_context.extraction.sealed_hash()
+                if orchestrated_run.run_context.extraction is not None
+                else None
+            )
+            record.fallback_mode = orchestrated_run.run_context.fallback_mode
+            record.tool_calls = [
+                tool_call.model_dump(mode="json")
+                for tool_call in orchestrated_run.run_context.tool_calls
+            ]
+            record.gate_results = [
+                gate_result.model_dump(mode="json")
+                for gate_result in orchestrated_run.outcome.gate_results
+            ]
+            return
+
         record.status = "COMPLETED"
         record.extraction_hash = (
             orchestrated_run.run_context.extraction.sealed_hash()
@@ -257,6 +292,65 @@ class InMemoryApiState:
         )
         record.bus.complete()
         record.loop.call_soon_threadsafe(record.completed_event.set)
+
+    async def submit_review(
+        self,
+        run_id: str,
+        *,
+        reviewer_id: str,
+        action: str,
+        approved_at: str,
+    ) -> ApiRunRecord:
+        """Apply reviewer action to a paused run and finalize proof, token, and execution."""
+
+        record = self.get_run(run_id)
+        if record.status != "AWAITING_REVIEW":
+            raise ApiStateError(
+                f"Run '{run_id}' is not awaiting review.",
+                error_code="REVIEW_NOT_REQUIRED",
+                status_code=409,
+            )
+        if record.pending_review is None:
+            raise ApiStateError(
+                f"Run '{run_id}' is missing review context.",
+                error_code="REVIEW_CONTEXT_MISSING",
+                status_code=500,
+            )
+
+        def contract_emit(event_name: str, data: dict[str, Any] | None) -> None:
+            record.bus.publish(event_name, data)
+
+        try:
+            with self._ledger_lock:
+                orchestrated_run = await asyncio.to_thread(
+                    complete_run_after_review,
+                    record.pending_review,
+                    reviewer_id=reviewer_id,
+                    action=action,
+                    approved_at=approved_at,
+                    ledger=self.ledger,
+                    contract_event_emitter=contract_emit,
+                )
+        except OrchestratorError as exc:
+            raise ApiStateError(
+                str(exc),
+                error_code="REVIEW_FAILED",
+                status_code=400,
+            ) from exc
+
+        record.orchestrated_run = orchestrated_run
+        record.pending_review = None
+        record.status = "COMPLETED"
+        record.review_reason = None
+        record.decision = orchestrated_run.proof_packet.final_decision.value if orchestrated_run.proof_packet else orchestrated_run.final_decision.value
+        record.clearance_token = (
+            orchestrated_run.clearance_token.model_dump_json()
+            if orchestrated_run.clearance_token is not None
+            else None
+        )
+        record.bus.complete()
+        record.loop.call_soon_threadsafe(record.completed_event.set)
+        return record
 
     def get_run(self, run_id: str) -> ApiRunRecord:
         """Return one stored run by ID."""
@@ -282,6 +376,12 @@ class InMemoryApiState:
         record = self.get_run(run_id)
         if record.status in {"COMPLETED", "FAILED"}:
             return record
+        if record.status == "AWAITING_REVIEW":
+            raise ApiStateError(
+                f"Run '{run_id}' is awaiting human review.",
+                error_code="AWAITING_REVIEW",
+                status_code=409,
+            )
 
         try:
             await asyncio.wait_for(record.completed_event.wait(), timeout=timeout_seconds)
@@ -346,6 +446,7 @@ class InMemoryApiState:
         ledger_chain_valid = self.ledger.verify_chain()
         packet_entry_valid = self.ledger.verify_packet_entry(proof_packet, current_entry)
         proof_hash_matches = proof_hash == current_entry.packet_hash
+        broken_record_index = self.ledger.find_first_broken_index()
 
         return {
             "run_id": record.run_id,
@@ -355,6 +456,7 @@ class InMemoryApiState:
             "ledger_entry_hash": current_entry.entry_hash,
             "chain_head": current_entry.entry_hash,
             "verified": ledger_chain_valid and packet_entry_valid and proof_hash_matches,
+            "broken_record_index": broken_record_index,
         }
 
     def tamper_run(self, run_id: str) -> dict[str, Any]:
@@ -383,6 +485,8 @@ class InMemoryApiState:
         verification = self.verify_run(run_id)
         verification["tampered_field"] = "packet_hash"
         verification["verify_now"] = verification["verified"]
+        if verification.get("broken_record_index") is None:
+            verification["broken_record_index"] = record.orchestrated_run.ledger_entry.index
         return verification
 
     def _current_ledger_entry(self, record: ApiRunRecord) -> LedgerEntry:

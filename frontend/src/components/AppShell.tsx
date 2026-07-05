@@ -25,8 +25,17 @@ function AppShell({
   center,
   right
 }: AppShellProps) {
+  const shellClassName = [
+    "console-shell",
+    runId !== null ? "console-shell--armed" : "",
+    decision !== null ? "console-shell--decided" : "",
+    decision !== null ? `console-shell--verdict-${decision.toLowerCase()}` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="console-shell">
+    <div className={shellClassName}>
       <ScreenVignetteFlash decision={decision} />
       <header className="console-topbar" data-testid="console-topbar">
         <div className="console-topbar__brand">
@@ -63,9 +72,9 @@ function AppShell({
       <div className="console-main">
         <SettlementHero collapsed={runId !== null} />
         <main className="console-grid" data-testid="console-grid">
-          <LeftColumn>{left}</LeftColumn>
-          <CenterConsole>{center}</CenterConsole>
-          <RightStack>{right}</RightStack>
+          <LeftColumn railLabel="Intake">{left}</LeftColumn>
+          <CenterConsole railLabel="Clearance bus">{center}</CenterConsole>
+          <RightStack railLabel="Outcome">{right}</RightStack>
         </main>
       </div>
     </div>

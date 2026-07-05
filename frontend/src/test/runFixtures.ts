@@ -369,6 +369,7 @@ export function makeSnapshot(decision: DecisionKind): RunSnapshotResponse {
     decision,
     fallback_mode: false,
     clearance_token: decision === "ALLOW" ? tokenForScenario(scenario) : null,
+    review_reason: null,
     error_message: null
   };
 }

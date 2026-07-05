@@ -65,6 +65,15 @@ export interface RunVerificationState {
   ledgerChainValid: boolean;
   packetEntryValid: boolean;
   tamperedField: string | null;
+  brokenRecordIndex: number | null;
+}
+
+export interface RunReviewState {
+  required: boolean;
+  reason: string;
+  reviewerId: string;
+  resolved: boolean;
+  action: string | null;
 }
 
 export interface RunCounterfactualState {
@@ -95,6 +104,7 @@ export interface RunStoreState {
   verification: RunVerificationState | null;
   sentinel: string | null;
   counterfactual: RunCounterfactualState | null;
+  review: RunReviewState | null;
   events: ContractRunEvent[];
   error: string | null;
 }
@@ -112,6 +122,7 @@ type RunStoreAction =
   | { type: "streamMode"; mode: StreamMode }
   | { type: "applyEvent"; event: ContractRunEvent }
   | { type: "verificationUpdated"; verification: VerifyRunResponse; tamperedField?: string | null }
+  | { type: "setReviewReviewerId"; reviewerId: string }
   | { type: "setError"; message: string | null }
   | { type: "markComplete" };
 
@@ -122,6 +133,7 @@ const STATION_DEFS = [
   { id: "tools", label: "Tools" },
   { id: "gates", label: "Gates" },
   { id: "decision", label: "Decision" },
+  { id: "review", label: "Review" },
   { id: "token", label: "Token" },
   { id: "proof", label: "Proof" },
   { id: "bank", label: "Bank" }
@@ -191,6 +203,7 @@ export function createInitialRunState(): RunStoreState {
     verification: null,
     sentinel: null,
     counterfactual: null,
+    review: null,
     events: [],
     error: null
   };
@@ -406,17 +419,21 @@ function reduceContractEvent(state: RunStoreState, event: ContractRunEvent): Run
       const decisionValue = stringValue(data, "final_decision");
       const reasonCodes = stringArrayValue(data, "reason_codes");
       if (decisionValue) {
+        const needsReview = decisionValue === "ESCALATE";
         const decisionStations = updateStation(
           nextState.stations,
           "decision",
           decisionValue === "ALLOW" ? "pass" : "fail",
           decisionValue
         );
+        const reviewStations = needsReview
+          ? updateStation(decisionStations, "review", "active", "awaiting reviewer")
+          : updateStation(decisionStations, "review", "pass", "not required");
         const tokenStations = updateStation(
-          decisionStations,
+          reviewStations,
           "token",
-          decisionValue === "ALLOW" ? "active" : "fail",
-          decisionValue === "ALLOW" ? "awaiting token" : "not issued"
+          needsReview ? "idle" : decisionValue === "ALLOW" ? "active" : "fail",
+          needsReview ? "paused for review" : decisionValue === "ALLOW" ? "awaiting token" : "not issued"
         );
         nextState = {
           ...nextState,
@@ -429,7 +446,50 @@ function reduceContractEvent(state: RunStoreState, event: ContractRunEvent): Run
             decisionValue,
             nextState.proposal?.request.action.amount ?? 0
           ),
-          stations: updateStation(tokenStations, "proof", "active", "awaiting proof seal")
+          stations: updateStation(tokenStations, "proof", "idle", needsReview ? "paused" : "awaiting proof seal")
+        };
+      }
+      return nextState;
+    }
+    case "REVIEW_REQUIRED": {
+      const reviewReason = stringValue(data, "review_reason") ?? "Human review required.";
+      nextState = {
+        ...nextState,
+        review: {
+          required: true,
+          reason: reviewReason,
+          reviewerId: nextState.review?.reviewerId ?? "",
+          resolved: false,
+          action: null
+        },
+        pending: true,
+        stations: updateStation(
+          updateStation(nextState.stations, "review", "active", "awaiting reviewer"),
+          "token",
+          "idle",
+          "paused for review"
+        )
+      };
+      return nextState;
+    }
+    case "REVIEW_COMPLETED": {
+      const action = stringValue(data, "action");
+      const reviewerId = stringValue(data, "reviewer_id") ?? nextState.review?.reviewerId ?? "";
+      nextState = {
+        ...nextState,
+        review: {
+          required: true,
+          reason: nextState.review?.reason ?? "Human review required.",
+          reviewerId,
+          resolved: true,
+          action
+        },
+        stations: updateStation(nextState.stations, "review", action === "APPROVED" ? "pass" : "fail", action ?? "completed")
+      };
+      if (action === "APPROVED") {
+        nextState = {
+          ...nextState,
+          stations: updateStation(nextState.stations, "token", "active", "awaiting token")
         };
       }
       return nextState;
@@ -557,9 +617,20 @@ export function runStoreReducer(state: RunStoreState, action: RunStoreAction): R
           ledgerEntryHash: action.verification.ledger_entry_hash,
           ledgerChainValid: action.verification.ledger_chain_valid,
           packetEntryValid: action.verification.packet_entry_valid,
-          tamperedField: action.tamperedField ?? state.verification?.tamperedField ?? null
+          tamperedField: action.tamperedField ?? state.verification?.tamperedField ?? null,
+          brokenRecordIndex: action.verification.broken_record_index ?? null
         }
       };
+    case "setReviewReviewerId":
+      return state.review
+        ? {
+            ...state,
+            review: {
+              ...state.review,
+              reviewerId: action.reviewerId
+            }
+          }
+        : state;
     case "setError":
       return {
         ...state,
@@ -601,6 +672,10 @@ function detailForEvent(event: ContractRunEvent): string {
       return "A gate finished with backend-supplied status and reasons.";
     case "DECISION_MADE":
       return "The backend emitted the final decision.";
+    case "REVIEW_REQUIRED":
+      return "The run paused for human review before token issuance.";
+    case "REVIEW_COMPLETED":
+      return "A reviewer recorded an approve or reject action in the proof chain.";
     case "TOKEN_ISSUED":
       return "The backend issued an ALLOW token.";
     case "PROOF_SEALED":

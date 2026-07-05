@@ -23,6 +23,7 @@ export interface RunEventsHandlers {
   onModeChange?: (mode: "sse" | "poll") => void;
   onError?: (error: Error) => void;
   onComplete?: () => void;
+  onReviewRequired?: () => void;
   buildExecutionRequest: (snapshot: RunSnapshotResponse | null) => ExecutionAttemptRequest | null;
 }
 
@@ -96,7 +97,7 @@ function eventKey(event: ContractRunEvent): string {
 }
 
 function isTerminalSnapshot(snapshot: RunSnapshotResponse): boolean {
-  return snapshot.status === "COMPLETED" || snapshot.status === "FAILED" || snapshot.decision !== null;
+  return snapshot.status === "COMPLETED" || snapshot.status === "FAILED";
 }
 
 async function resolveExecutionRequest(
@@ -316,6 +317,9 @@ export function createRunEventsClient(
 
     seenKeys.add(key);
     await handlers.onEvent(outgoingEvent);
+    if (event.event === "REVIEW_REQUIRED") {
+      handlers.onReviewRequired?.();
+    }
   }
 
   async function replaySnapshot(

@@ -5,17 +5,17 @@ This verifies real Vultr Serverless Inference without committing secrets.
 PowerShell setup:
 
 ```powershell
-cd C:\Users\Admin\TOSCO
+cd backend
 Copy-Item .env.example .env
 notepad .env
 ```
 
-Add your real key only in `.env`:
+Add your key only in `backend/.env` (never commit it):
 
 ```dotenv
-VULTR_API_KEY=your_real_key_here
-VULTR_INFERENCE_BASE_URL=https://api.vultrinference.com/v1
-VULTR_CHAT_MODEL=nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16
+VULTR_API_KEY=
+VULTR_INFERENCE_URL=https://api.vultrinference.com/v1
+VULTR_MODEL=
 TOSCO_FALLBACK=true
 TOSCO_USE_SYSTEM_TRUST_STORE=true
 VULTR_CA_BUNDLE=
@@ -24,7 +24,7 @@ VULTR_CA_BUNDLE=
 Then run:
 
 ```powershell
-cd C:\Users\Admin\TOSCO\backend
+cd backend
 .\.venv\Scripts\Activate.ps1
 python scripts\vultr_live_smoke.py
 ```

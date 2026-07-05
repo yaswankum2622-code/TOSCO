@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { ContractRunEvent } from "../../api/types";
 import type { RunGateState, RunStoreState, StationStatus } from "../../run/store";
 import { shortHash } from "../../utils/format";
+import SystemSealMark from "../SystemSealMark";
 import DecisionStamp from "./DecisionStamp";
 import SpineSegment from "./SpineSegment";
 import StationRow from "./StationRow";
@@ -216,6 +217,18 @@ export function buildClearanceSpineRows(state: RunStoreState): DerivedSpineRow[]
       ? "AWAITING EXECUTION"
       : "awaiting execution";
 
+  const proofStation = state.stations.find((station) => station.id === "proof");
+  const proofStatus: StationStatus = state.proof?.sealed
+    ? "pass"
+    : proofStation?.status === "active"
+      ? "active"
+      : proofStation?.status ?? "idle";
+  const proofDetail = state.proof?.chainHash
+    ? shortHash(state.proof.chainHash, 12, 10)
+    : proofStation?.status === "active"
+      ? "sealing ledger"
+      : "awaiting proof seal";
+
   const rows: DerivedSpineRow[] = [
     {
       id: "propose",
@@ -234,7 +247,8 @@ export function buildClearanceSpineRows(state: RunStoreState): DerivedSpineRow[]
       id: "extract",
       label: "EXTRACT",
       status: extractionStatus,
-      detail: extractionDetail
+      detail: extractionDetail,
+      aux: extractionSealed ? <SystemSealMark label="SEALED" testId="spine-extraction-seal" /> : undefined
     },
     {
       id: "tools",
@@ -261,6 +275,31 @@ export function buildClearanceSpineRows(state: RunStoreState): DerivedSpineRow[]
       detail: decisionDetail,
       detailTestId: "final-decision",
       overlay: state.decision ? <DecisionStamp decision={state.decision.value} /> : undefined
+    },
+    {
+      id: "review",
+      label: "REVIEW",
+      status:
+        state.review?.required === true
+          ? state.review.resolved
+            ? state.review.action === "APPROVED"
+              ? "pass"
+              : "fail"
+            : "active"
+          : "idle",
+      detail:
+        state.review?.required === true
+          ? state.review.resolved
+            ? `${state.review.action ?? "DONE"} | ${state.review.reviewerId || "reviewer"}`
+            : "awaiting reviewer"
+          : "not required"
+    },
+    {
+      id: "proof",
+      label: "PROOF",
+      status: proofStatus,
+      detail: proofDetail,
+      aux: state.proof?.sealed ? <SystemSealMark label="SEALED" testId="spine-proof-seal" /> : undefined
     },
     {
       id: "token",

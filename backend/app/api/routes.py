@@ -20,6 +20,7 @@ from app.api.schemas import (
     ExecutionAttemptRequest,
     ExecutionAttemptResponse,
     ProofPacketResponse,
+    ReviewRunRequest,
     RunHandleResponse,
     RunSnapshotResponse,
     RunSummaryResponse,
@@ -330,6 +331,36 @@ async def start_custom_run(
     return RunHandleResponse(run_id=record.run_id)
 
 
+@router.post("/runs/{run_id}/review")
+async def submit_run_review(
+    run_id: str,
+    payload: ReviewRunRequest,
+    state: InMemoryApiState = Depends(get_state),
+    response_format: str | None = Query(default=None, alias="format"),
+) -> RunHandleResponse | RunSummaryResponse:
+    """Apply reviewer action to a paused run and resume finalization."""
+
+    from datetime import datetime, timezone
+
+    approved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        record = await state.submit_review(
+            run_id,
+            reviewer_id=payload.reviewer_id,
+            action=payload.action,
+            approved_at=approved_at,
+        )
+    except ApiStateError as exc:
+        _raise_state_error(exc)
+
+    if response_format == "summary":
+        if record.orchestrated_run is None:
+            raise ApiRouteError(409, "RUN_NOT_READY", f"Run '{run_id}' is still processing.")
+        return run_to_summary(record.orchestrated_run)
+
+    return RunHandleResponse(run_id=record.run_id)
+
+
 @router.get("/integrations/vultr/status", response_model=VultrStatusResponse)
 def get_vultr_status() -> VultrStatusResponse:
     """Expose safe Vultr configuration status without leaking the API key."""
@@ -434,7 +465,7 @@ async def get_run_proof(
     except ApiStateError as exc:
         _raise_state_error(exc)
 
-    if record.orchestrated_run is None:
+    if record.orchestrated_run is None or record.orchestrated_run.proof_packet is None or record.orchestrated_run.ledger_entry is None:
         raise ApiRouteError(409, "PROOF_NOT_READY", f"Run '{run_id}' has not sealed proof yet.")
 
     return ProofPacketResponse(

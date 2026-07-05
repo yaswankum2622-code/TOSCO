@@ -191,10 +191,12 @@ def issue_clearance_token(
 
     if not secret:
         raise TokenError("secret cannot be empty")
-    if outcome.final_decision is not Decision.ALLOW or outcome.allow_execution is not True:
-        raise TokenError("clearance tokens may only be issued for ALLOW outcomes")
     if packet.final_decision is not Decision.ALLOW or packet.allow_execution is not True:
         raise TokenError("clearance tokens may only be issued for ALLOW proof packets")
+    if packet.human_review is None and (
+        outcome.final_decision is not Decision.ALLOW or outcome.allow_execution is not True
+    ):
+        raise TokenError("clearance tokens may only be issued for ALLOW outcomes")
     if packet.run_id != ctx.run_id:
         raise TokenError("ProofPacket run_id does not match RunContext")
     if packet.workflow_id != ctx.workflow_id:

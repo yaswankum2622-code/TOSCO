@@ -92,6 +92,11 @@ function ProofSeal({ state }: ProofSealProps) {
           {state.verification ? (state.verification.verified ? "Chain Intact" : "Chain Broken") : "Awaiting verification"}
         </span>
       </div>
+      {state.proof?.sealed === true && state.proof.chainHash !== null ? (
+        <p className="proof-seal-card__caption">
+          SHA-256 hash chain — each record&apos;s hash includes the previous. Any edit breaks every later link.
+        </p>
+      ) : null}
       {state.proof?.sealed !== true || state.proof.chainHash === null ? (
         <div className="proof-seal proof-seal--dormant" data-testid="proof-seal">
           <div className="proof-seal__ring">

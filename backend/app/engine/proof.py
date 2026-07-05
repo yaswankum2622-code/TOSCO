@@ -105,6 +105,24 @@ class GateResultDigest(BaseModel):
         return _require_sha256_hex(value, "result_hash")
 
 
+class HumanReviewRecord(BaseModel):
+    """Capture reviewer action for audit and proof linkage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reviewer_id: str
+    approved_at: str
+    action: str
+    review_reason: str
+
+    @field_validator("reviewer_id", "approved_at", "action", "review_reason")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str, info: Any) -> str:
+        if not value.strip():
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return value.strip()
+
+
 class ProofPacket(BaseModel):
     """Represent the cryptographic summary of one clearance decision."""
 
@@ -124,6 +142,7 @@ class ProofPacket(BaseModel):
     final_decision: Decision
     allow_execution: bool
     fallback_mode: bool
+    human_review: HumanReviewRecord | None = None
 
     @field_validator("run_id", "workflow_id", "packet_version", "packet_type")
     @classmethod
@@ -233,7 +252,14 @@ def build_gate_result_digests(results: list[GateResult]) -> list[GateResultDiges
     return digests
 
 
-def create_proof_packet(ctx: RunContext, outcome: ClearanceOutcome) -> ProofPacket:
+def create_proof_packet(
+    ctx: RunContext,
+    outcome: ClearanceOutcome,
+    *,
+    human_review: HumanReviewRecord | None = None,
+    final_decision: Decision | None = None,
+    allow_execution: bool | None = None,
+) -> ProofPacket:
     """Construct the deterministic proof artifact for a completed clearance outcome."""
 
     if ctx.run_id != outcome.run_id:
@@ -255,6 +281,13 @@ def create_proof_packet(ctx: RunContext, outcome: ClearanceOutcome) -> ProofPack
     if not validated_outcome.gate_results:
         raise ProofPacketError("ProofPacket requires at least one gate result")
 
+    resolved_decision = final_decision if final_decision is not None else validated_outcome.final_decision
+    resolved_allow = (
+        allow_execution
+        if allow_execution is not None
+        else validated_outcome.allow_execution
+    )
+
     try:
         return ProofPacket(
             run_id=ctx.run_id,
@@ -268,9 +301,10 @@ def create_proof_packet(ctx: RunContext, outcome: ClearanceOutcome) -> ProofPack
             decision_summary_hash=canonical_json_hash(
                 validated_outcome.decision_summary.model_dump(mode="json")
             ),
-            final_decision=validated_outcome.final_decision,
-            allow_execution=validated_outcome.allow_execution,
+            final_decision=resolved_decision,
+            allow_execution=resolved_allow,
             fallback_mode=validated_outcome.fallback_mode,
+            human_review=human_review,
         )
     except ValidationError as exc:
         raise ProofPacketError(f"ProofPacket validation failed: {exc}") from exc

@@ -23,6 +23,8 @@ class EventType(StrEnum):
     GATE_STARTED = "GATE_STARTED"
     GATE_COMPLETED = "GATE_COMPLETED"
     DECISION_MADE = "DECISION_MADE"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    REVIEW_COMPLETED = "REVIEW_COMPLETED"
     PROOF_SEALED = "PROOF_SEALED"
     LEDGER_APPENDED = "LEDGER_APPENDED"
     CLEARANCE_TOKEN_ISSUED = "CLEARANCE_TOKEN_ISSUED"
@@ -156,3 +158,11 @@ class TimelineBuilder:
             return EventTimeline(run_id=self.run_id, events=list(self._events))
         except ValidationError as exc:
             raise EventTimelineError(f"Invalid event timeline: {exc}") from exc
+
+    @classmethod
+    def from_timeline(cls, timeline: EventTimeline) -> "TimelineBuilder":
+        """Resume timeline construction from an existing partial timeline."""
+
+        builder = cls(timeline.run_id)
+        builder._events = list(timeline.events)
+        return builder

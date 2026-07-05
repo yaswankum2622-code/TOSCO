@@ -188,7 +188,7 @@ def test_issue_clearance_token_rejects_block_outcome() -> None:
     ctx, outcome, packet, _, ledger_entry = build_injection_bundle()
 
     assert outcome.final_decision is Decision.BLOCK
-    with pytest.raises(TokenError, match="ALLOW outcomes"):
+    with pytest.raises(TokenError, match="ALLOW proof packets"):
         issue_clearance_token(
             ctx=ctx,
             outcome=outcome,
@@ -204,7 +204,7 @@ def test_issue_clearance_token_rejects_freeze_outcome() -> None:
     ctx, outcome, packet, _, ledger_entry = build_forgery_bundle()
 
     assert outcome.final_decision is Decision.FREEZE
-    with pytest.raises(TokenError, match="ALLOW outcomes"):
+    with pytest.raises(TokenError, match="ALLOW proof packets"):
         issue_clearance_token(
             ctx=ctx,
             outcome=outcome,

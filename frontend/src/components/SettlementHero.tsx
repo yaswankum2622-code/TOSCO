@@ -152,19 +152,6 @@ function SettlementHero({ collapsed }: SettlementHeroProps) {
             </motion.article>
           ))}
         </motion.div>
-        <motion.div
-          className="settlement-hero__rail"
-          initial={false}
-          animate={{
-            opacity: collapsed ? 0.72 : 1,
-            scaleX: collapsed ? 0.96 : 1
-          }}
-          transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: "easeInOut" }}
-        >
-          <span className="settlement-hero__rail-line settlement-hero__rail-line--left" />
-          <span className="settlement-hero__rail-chip">Night settlement surface</span>
-          <span className="settlement-hero__rail-line settlement-hero__rail-line--right" />
-        </motion.div>
       </motion.div>
     </motion.section>
   );

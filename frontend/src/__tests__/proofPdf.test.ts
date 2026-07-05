@@ -42,7 +42,8 @@ describe("proofPdf", () => {
       ledgerEntryHash: "b".repeat(64),
       ledgerChainValid: true,
       packetEntryValid: true,
-      tamperedField: null
+      tamperedField: null,
+      brokenRecordIndex: null
     };
 
     const doc = buildProofPacketPdf(state);

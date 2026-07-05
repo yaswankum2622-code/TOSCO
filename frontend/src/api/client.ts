@@ -12,6 +12,7 @@ import type {
   ScenarioMetadata,
   StartRunRequest,
   CustomRunRequest,
+  ReviewRunRequest,
   VerifyRunResponse,
   VultrStatusResponse,
   WorkflowMetadata
@@ -70,6 +71,19 @@ async function requestJson<T>(path: string, options: JsonRequestOptions = {}): P
   return (await response.json()) as T;
 }
 
+export function formatCustomRunError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404 || error.status === 405) {
+      return "Backend route missing — restart the backend on :8010 (uvicorn factory).";
+    }
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Custom run failed.";
+}
+
 export const apiClient = {
   getHealth: () => requestJson<HealthResponse>("/api/health"),
   getVultrStatus: () => requestJson<VultrStatusResponse>("/api/integrations/vultr/status"),
@@ -105,6 +119,11 @@ export const apiClient = {
   tamperRun: (runId: string) =>
     requestJson<VerifyRunResponse>(`/api/runs/${runId}/tamper-demo`, {
       method: "POST"
+    }),
+  submitReview: (runId: string, payload: ReviewRunRequest) =>
+    requestJson<RunHandleResponse>(`/api/runs/${runId}/review`, {
+      method: "POST",
+      body: JSON.stringify(payload)
     }),
   resetDemo: () =>
     requestJson<ResetResponse>("/api/reset", {

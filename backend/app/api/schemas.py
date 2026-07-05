@@ -167,6 +167,7 @@ class RunSnapshotResponse(BaseModel):
     decision: str | None = None
     fallback_mode: bool = False
     clearance_token: str | None = None
+    review_reason: str | None = None
     error_message: str | None = None
 
     @field_validator("run_id", "status")
@@ -176,7 +177,7 @@ class RunSnapshotResponse(BaseModel):
 
         return _require_non_empty(value, info.field_name)
 
-    @field_validator("workflow_id", "decision", "clearance_token", "error_message")
+    @field_validator("workflow_id", "decision", "clearance_token", "error_message", "review_reason")
     @classmethod
     def validate_optional_strings(
         cls,
@@ -222,6 +223,7 @@ class VerifyRunResponse(BaseModel):
     chain_head: str | None = None
     tampered_field: str | None = None
     verify_now: bool | None = None
+    broken_record_index: int | None = None
 
     @field_validator("run_id", "proof_hash", "ledger_entry_hash")
     @classmethod
@@ -277,6 +279,22 @@ class VultrStatusResponse(BaseModel):
     @classmethod
     def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
         """Reject blank Vultr status metadata."""
+
+        return _require_non_empty(value, info.field_name)
+
+
+class ReviewRunRequest(BaseModel):
+    """Request body for submitting human review on a paused run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str
+    action: str
+
+    @field_validator("reviewer_id", "action")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str, info: ValidationInfo) -> str:
+        """Reject blank review fields."""
 
         return _require_non_empty(value, info.field_name)
 
@@ -337,11 +355,19 @@ class ExecutionAttemptResponse(BaseModel):
 def run_to_summary(orchestrated_run: OrchestratedRun) -> RunSummaryResponse:
     """Convert a stored orchestrated run into the API summary shape."""
 
+    if (
+        orchestrated_run.awaiting_review
+        or orchestrated_run.execution_result is None
+        or orchestrated_run.proof_packet is None
+        or orchestrated_run.ledger_entry is None
+    ):
+        raise ValueError("Run summary is unavailable until review and finalization complete.")
+
     return RunSummaryResponse(
         scenario=orchestrated_run.scenario,
         run_id=orchestrated_run.run_context.run_id,
-        final_decision=orchestrated_run.final_decision.value,
-        allow_execution=orchestrated_run.allow_execution,
+        final_decision=orchestrated_run.proof_packet.final_decision.value,
+        allow_execution=orchestrated_run.proof_packet.allow_execution,
         token_issued=orchestrated_run.clearance_token is not None,
         mock_bank_status=orchestrated_run.execution_result.status,
         mock_bank_reason_code=orchestrated_run.execution_result.reason_code,

@@ -15,24 +15,27 @@
 Public repo from commit #1. Push every 90 minutes (laptop-loss rule). One logical feature per commit. Protected `main`. CI runs pytest on gates + features. README carries the contribution statement ("concept prior, all code built at event").
 
 ## Environment variables
+Copy `backend/.env.example` to `backend/.env` (never commit `.env`).
+
 ```
-VULTR_API_KEY=...            # Serverless Inference + VultronRetriever
-VULTR_INFERENCE_URL=...
-TOSCO_TOKEN_SECRET=...        # HMAC signing key (never commit)
-TOSCO_FALLBACK=false          # force local fallback for offline demo
-DATABASE_URL=sqlite:///tosco.db
+VULTR_API_KEY=
+VULTR_INFERENCE_URL=https://api.vultrinference.com/v1
+VULTR_MODEL=
+TOSCO_TOKEN_SECRET=...       # HMAC signing key (never commit)
+TOSCO_FALLBACK=true          # local fallback when Vultr is unset or unreachable
 ```
 
 ## Local run
 ```
 # backend
 cd backend && python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt   # fastapi uvicorn pydantic pyyaml pytest
-uvicorn app.main:app --reload --port 8000
-pytest -q                          # expect all green
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m uvicorn app.api.app:create_app --factory --host 127.0.0.1 --port 8010
+python -m pytest -q                          # expect all green
 
 # frontend
-cd frontend && npm i && npm run dev  # Vite on :5173, proxy /api → :8000
+cd frontend && npm i && npm run dev  # Vite on :5173, proxy /api → :8010
 ```
 
 ## Fallback mode

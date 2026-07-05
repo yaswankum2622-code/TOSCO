@@ -122,6 +122,7 @@ export interface RunSnapshotResponse {
   decision: string | null;
   fallback_mode: boolean;
   clearance_token: string | null;
+  review_reason: string | null;
   error_message: string | null;
 }
 
@@ -163,6 +164,12 @@ export interface VerifyRunResponse {
   chain_head?: string | null;
   tampered_field?: string | null;
   verify_now?: boolean | null;
+  broken_record_index?: number | null;
+}
+
+export interface ReviewRunRequest {
+  reviewer_id: string;
+  action: "APPROVED" | "REJECTED";
 }
 
 export interface ResetResponse {

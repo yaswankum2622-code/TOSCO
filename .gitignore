@@ -1,7 +1,39 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Python
 __pycache__/
 *.py[cod]
-.pytest_cache/
+*$py.class
 .venv/
-.env
-.env.local
-*.env
+venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.db
+
+# Node / frontend
+node_modules/
+.vite/
+coverage/
+frontend/dist/
+*.tsbuildinfo
+
+# Logs and local runtime
+*.log
+backend-live.log
+backend-live.err.log
+frontend-live.log
+frontend-live.err.log
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.codex-temp/
+
+# Local-only artifacts (not part of the public repo)
+products-compute-serverless-inference.pdf

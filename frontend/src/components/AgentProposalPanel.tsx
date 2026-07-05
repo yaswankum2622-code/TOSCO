@@ -39,8 +39,8 @@ function AgentProposalPanel({ proposal }: AgentProposalPanelProps) {
               </span>
             </div>
             <div className="proposal-card__intent">
-              <span className="kv-label">Intent ID</span>
-              <strong className="proposal-card__action">{proposal?.intentId ?? "pending"}</strong>
+              <span className="kv-label">Intent</span>
+              <strong className="proposal-card__action mono-value">{proposal?.intentId ?? "pending"}</strong>
             </div>
           </div>
           <div className="kv-grid">
